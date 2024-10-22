@@ -93,6 +93,22 @@ from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
 
+def remove_key(d, key):
+    if not isinstance(d, dict):
+        return d
+
+    cleaned_dict = {}
+    for k, value in d.items():
+        if k == key:
+            continue  # Skip this key
+        elif isinstance(value, dict):
+            cleaned_dict[k] = remove_key(value, key)
+        else:
+            cleaned_dict[k] = value
+
+    return cleaned_dict
+
+
 class FNSNeuron(GradNeuDyn):
     r"""
     Treves 1993 neuron model with adaptation current.
@@ -293,7 +309,11 @@ class FNSNeuron(GradNeuDyn):
             "_g_K_initializer",
         ],
     ):
-        out = {key: value for key, value in self.__dict__.items() if key in keys}
+        out = {
+            key: maybe_initializer(value)
+            for key, value in self.__dict__.items()
+            if key in keys
+        }
         out["embedding"] = {self.embedding.__class__.__name__: self.embedding.to_dict()}
         return out
 
@@ -365,16 +385,12 @@ class FNSNeuron(GradNeuDyn):
 
 def maybe_initializer(x, exclude=["rng"]):
     if isinstance(x, bp.init.Initializer):
-        return {
-            keys: value for keys, value in x.__dict__.items() if keys not in exclude
-        }
-    else:
-        return x
-
-
-def maybe_initialize(x, *args):
-    if isinstance(x, bp.init.Initializer):
-        return x(*args)
+        name = x.__class__.__name__
+        d = {keys: value for keys, value in x.__dict__.items() if keys not in exclude}
+        if not d:
+            return name
+        else:
+            return {name: d}
     else:
         return x
 
@@ -393,7 +409,7 @@ class Synapse(bp.Projection):
         super().__init__()
         self.proj = bp.dyn.FullProjAlignPreSDMg(
             pre=pre,
-            delay=maybe_initialize(self.delay, pre.size),
+            delay=self.delay,
             syn=bp.dyn.AMPA.desc(
                 pre.num, alpha=alpha, beta=1 / tau_d, T=1 / tau_r, T_dur=tau_r
             ),
@@ -684,13 +700,29 @@ class FNSCircuit(bp.Network):
         )
 
         # Synapses
-        self.E2E = Synapse(self.E, self.E, delay=bp.init.Uniform(0, 10), conn=conn_E2E)
-        self.E2I = Synapse(self.E, self.I, delay=10.0, conn=conn_E2I)
-        self.I2E = Synapse(self.I, self.E, delay=10.0, conn=conn_I2E)
-        self.I2I = Synapse(self.I, self.I, delay=10.0, conn=conn_I2I)
+        self.E2E = Synapse(self.E, self.E, delay=2.0, conn=conn_E2E)
+        self.E2I = Synapse(self.E, self.I, delay=2.0, conn=conn_E2I)
+        self.I2E = Synapse(self.I, self.E, delay=2.0, conn=conn_I2E)
+        self.I2I = Synapse(self.I, self.I, delay=2.0, conn=conn_I2I)
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)
         self.Iin = bp.dyn.InputVar(self.I.varshape)
         self.E.add_inp_fun("", self.Ein)
         self.I.add_inp_fun("", self.Iin)
+
+    def to_dict(self):
+        return {
+            self.__class__.__name__: {
+                "populations": {
+                    "E": self.E.to_dict(),
+                    "I": self.I.to_dict(),
+                },
+                "synapses": {
+                    "E2E": self.E2E.to_dict(),
+                    "E2I": self.E2I.to_dict(),
+                    "I2E": self.I2E.to_dict(),
+                    "I2I": self.I2I.to_dict(),
+                },
+            }
+        }
