@@ -1,5 +1,2 @@
-from model import FNSCircuit, FNSNeuron
+from neurons import FNSCircuit, FNSNeuron
 import numpy as np
-
-
-

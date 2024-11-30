@@ -1,261 +1,149 @@
 import brainpy as bp
 import brainpy.math as bm
 import numpy as np
-from scipy.special import gamma
-from functools import partial
+import matplotlib.pyplot as plt
+from itertools import product
+import networkx as nx
+from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
-from jax import random
-import matplotlib.pyplot as plt
+from jax import jit, vmap
+import uuid
+from brainpy.dyn.neurons import GradNeuDyn
+from brainpy.dyn import NeuDyn
+from brainpy.initialize import (
+    ZeroInit,
+    OneInit,
+    Uniform,
+    variable_,
+    noise as init_noise,
+)
+from brainpy import share
+from brainpy.types import Shape, ArrayType
+from brainpy.check import is_initializer
+from brainpy import odeint, sdeint, JointEq
+from typing import Union, Callable, Optional, Sequence, Any
+from functools import partial
+
+from neurons import *
 
 
-# Define the neuron model equivalent to NEST's iaf_psc_delta with V_min parameter
-class IafPscDeltaNeuron(bp.dyn.NeuDyn):
+class EmbeddedLif(bp.dyn.LifRef):
     def __init__(
         self,
-        size,
-        C_m=1.0,
-        tau_m=20.0,
-        t_ref=2.0,
-        E_L=0.0,
-        V_reset=10.0,
-        V_th=20.0,
-        V_min=-10.0,
-        method="exp_auto",
-        **kwargs
+        *args,
+        embedding: Union[None, AbstractPositions] = None,
+        **kwargs,
     ):
-        super().__init__(size=size, **kwargs)
-        self.C_m = C_m
-        self.tau_m = tau_m
-        self.t_ref = t_ref
-        self.E_L = E_L
-        self.V_reset = V_reset
-        self.V_th = V_th
-        self.V_min = V_min
+        super().__init__(*args, **kwargs)
+        maybe_default_embedding(self, embedding)
 
-        # Initialize variables
-        self.V = bm.Variable(bm.zeros(self.num))
-        self.spike = bm.Variable(bm.zeros(self.num, dtype=bool))
-        self.t_last_spike = bm.Variable(bm.ones(self.num) * -1e7)
-
-        # ODE integrator
-        self.integral = bp.odeint(method=method, f=self.derivative)
-
-    def derivative(self, V, t, I_syn):
-        dVdt = (-(V - self.E_L) + I_syn) / (self.tau_m / self.C_m)
-        return dVdt
-
-    def update(self, tdi):
-        t, dt = tdi["t"], tdi["dt"]
-        I_syn = self.get_input("input") + self.sum_input("input_post")
-        V = self.integral(self.V.value, t, I_syn, dt)
-        # Enforce V >= V_min
-        V = bm.maximum(V, self.V_min)
-        # Refractory period
-        refractory = (t - self.t_last_spike.value) <= self.t_ref
-        V = bm.where(refractory, self.V.value, V)
-        # Spike generation
-        self.spike.value = bm.logical_and(V >= self.V_th, ~refractory)
-        self.t_last_spike.value = bm.where(self.spike.value, t, self.t_last_spike.value)
-        # Reset membrane potential
-        V = bm.where(self.spike.value, self.V_reset, V)
-        self.V.value = V
-
-
-# Define the network
-class HeterogeneousCircuit(bp.DynSysGroup):
-    def __init__(
+    def to_dict(
         self,
-        dt=0.1,
-        delay=1.5,
-        epsilon=0.1,
-        tauMem=20.0,
-        theta=20.0,
-        Vr=10.0,
-        g=4.0,
-        eta=0.3,
-        orderCE=4000,
-        J=0.02,
-        alpha=2.0,
-        simtime=10000.0,
-        **kwargs
+        keys=[
+            "V_rest",
+            "V_reset",
+            "V_th",
+            "R",
+            "tau",
+            "V_initializer",
+            "tau_ref",
+            "ref_var",
+        ],
     ):
+        out = {
+            key: maybe_initializer(value)
+            for key, value in self.__dict__.items()
+            if key in keys
+        }
+        out["embedding"] = {self.embedding.__class__.__name__: self.embedding.to_dict()}
+        return out
+
+
+class HeterogenousCircuit(bp.Network):
+    def __init__(self, num_exc, num_inh, method="exp_auto"):
         super().__init__()
 
-        # Parameters
-        self.dt = dt
-        self.delay = delay
-        self.epsilon = epsilon
-        self.tauMem = tauMem
-        self.theta = theta
-        self.Vr = Vr
-        self.g = g
-        self.eta = eta
-        self.orderCE = orderCE
-        self.J = J
-        self.alpha = alpha
-        self.simtime = simtime
+        # geometry
+        domain = (2 * np.pi,)
+        exc_positions = GridPositions(domain)
+        inh_positions = RandomPositions(domain)
 
-        # Calculate order, NE, NI
-        order = int(self.orderCE / (self.epsilon * 4))
-        NE = 4 * order
-        NI = 1 * order
-        self.NE = NE
-        self.NI = NI
-        self.N_neurons = NE + NI
+        epsilon = 0.1  # Connection probability
+        g = 4.0  # ratio exc weight/inh weight
+        alpha = 2.0  # Order
+        J = 0.1  # Amplitude of exc psp
+        J_inh = -g * J  # Amplitude of inh psp
+        CE = int(epsilon * num_exc)  # number of excitatory synapses per neuron
+        CI = int(epsilon * num_inh)  # number of inhibitory synapses per neuron
 
-        # CE and CI
-        self.CE = int(self.epsilon * NE)
-        self.CI = int(self.epsilon * NI)
+        theta = 20.0  # membrane threshold potential in mV
+        tauMem = 20.0  # # time constant of membrane potential in ms
+        nu_th = theta / (J * CE * tauMem)
+        eta = 1.0 * 0.3  # external rate relative to threshold rate
+        nu_ex = eta * nu_th
+        p_rate = 1000.0 * nu_ex * CE
 
-        # Neuron parameters
-        self.J_ex = self.J
-        self.J_in = -self.g * self.J_ex
-        self.V_reset = self.Vr
-        self.V_th = self.theta
-        self.V_min = -10.0  # as specified
-
-        # Input parameters
-        self.nu_th = self.theta / (self.J * self.CE * self.tauMem)
-        self.nu_ex = self.eta * self.nu_th
-        self.constant_input_amplitude = (
-            self.CE * self.nu_ex * 10
-        )  # as per the modification
-
-        # Create neuron populations
-        self.E = IafPscDeltaNeuron(
-            size=self.NE,
-            C_m=1.0,
-            tau_m=self.tauMem,
-            t_ref=2.0,
-            E_L=0.0,
-            V_reset=self.V_reset,
-            V_th=self.V_th,
-            V_min=self.V_min,
-            method="exp_auto",
-            name="Excitatory",
-        )
-        self.I = IafPscDeltaNeuron(
-            size=self.NI,
-            C_m=1.0,
-            tau_m=self.tauMem,
-            t_ref=2.0,
-            E_L=0.0,
-            V_reset=self.V_reset,
-            V_th=self.V_th,
-            V_min=self.V_min,
-            method="exp_auto",
-            name="Inhibitory",
+        # excitatory neurons
+        self.E = EmbeddedLif(
+            num_exc,
+            V_rest=0.0,
+            V_reset=10.0,
+            V_th=theta,
+            R=1.0,
+            tau=tauMem,
+       d     V_initializer=bp.init.Constant(10.0),
+            tau_ref=2.0,
+            ref_var=True,
+            method=method,
+            embedding=exc_positions,
         )
 
-        # Generate synaptic weights
-        self.generate_synaptic_weights()
+        # inhibitory neurons: same as excitatory
+        self.I = EmbeddedLif(
+            num_inh,
+            V_rest=0.0,
+            V_reset=10.0,
+            V_th=theta,
+            R=1.0,
+            tau=tauMem,
+            V_initializer=bp.init.Constant(10.0),
+            tau_ref=2.0,
+            ref_var=True,
+            method=method,
+            embedding=inh_positions,
+        )
 
-        # Create synapses
-        self.create_synapses()
+        delay_step = int(2.0 // bp.share["dt"])
 
-        # Add constant input to all neurons
-        self.add_constant_input()
+        self.ext = bp.neurons.PoissonGroup(num_exc, freqs=p_rate / CE)
+        conn_ext2E = bp.connect.FixedPostNum(CE)
+        self.ext2E = bp.synapses.Delta(
+            self.ext, self.E, conn_ext2E, delay_step=delay_step, g_max=J
+        )
 
-    def generate_synaptic_weights(self):
-        if self.alpha != 2.0:
-            # Generate excitatory weights using Pareto distribution
-            A_alpha = gamma(1 + self.alpha) * np.sin(np.pi * self.alpha / 2) / np.pi
-            D = 0.5
-            x1fac = (2 * A_alpha * D / self.alpha) ** (1 / self.alpha)
-            x0fac = 1 - x1fac * self.alpha / (self.alpha - 1)
-            # Excitatory weights
-            rng = np.random.default_rng()
-            samples_ex = (
-                x1fac * (rng.pareto(self.alpha, (self.N_neurons, self.CE)) + 1) + x0fac
-            )
-            self.J_ex_tot = self.J_ex * samples_ex
-            # Inhibitory weights, tight balance
-            samples_in = []
-            for sum_a in np.sum(samples_ex, axis=1):
-                # Adjust inhibitory weights to maintain balance
-                b = x1fac * (rng.pareto(self.alpha, self.CI) + 1) + x0fac
-                samples_in.append(b)
-            samples_in = np.array(samples_in)
-            self.J_in_tot = self.J_in * samples_in
-        else:
-            # Classical model with fixed weights
-            self.J_ex_tot = self.J_ex
-            self.J_in_tot = self.J_in
+        conn_E2E = bp.connect.FixedPreNum(CE)
+        conn_E2I = bp.connect.FixedPreNum(CE)
+        conn_I2E = bp.connect.FixedPreNum(CI)
+        conn_I2I = bp.connect.FixedPreNum(CI)
 
-    def create_synapses(self):
-        # Connections from E to E and I
-        conn_E = bp.connect.FixedIndegree(indegree=self.CE)
-        if self.alpha != 2.0:
-            # Use variable weights
-            syn_EE = bp.dyn.ProjAlignPreMg(
-                pre=self.E,
-                post=self.E,
-                conn=conn_E,
-                weight=self.J_ex_tot[: self.NE],
-                delay=self.delay,
-            )
-            syn_EI = bp.dyn.ProjAlignPreMg(
-                pre=self.E,
-                post=self.I,
-                conn=conn_E,
-                weight=self.J_ex_tot[self.NE :],
-                delay=self.delay,
-            )
-        else:
-            # Use fixed weights
-            syn_EE = bp.dyn.ProjAlignFixed(
-                pre=self.E, post=self.E, conn=conn_E, weight=self.J_ex, delay=self.delay
-            )
-            syn_EI = bp.dyn.ProjAlignFixed(
-                pre=self.E, post=self.I, conn=conn_E, weight=self.J_ex, delay=self.delay
-            )
+        # Synapses
+        # ! We have no coupling weights yet; make an initializer for the pareto distribution
+        self.E2E = bp.synapses.Delta(
+            self.E, self.E, conn_E2E, delay_step=delay_step, g_max=J
+        )
+        self.E2I = bp.synapses.Delta(
+            self.E, self.I, conn_E2I, delay_step=delay_step, g_max=J
+        )
+        self.I2E = bp.synapses.Delta(
+            self.I, self.E, conn_I2E, delay_step=delay_step, g_max=J_inh
+        )
+        self.I2I = bp.synapses.Delta(
+            self.I, self.I, conn_I2I, delay_step=delay_step, g_max=J_inh
+        )
 
-        # Connections from I to E and I
-        conn_I = bp.connect.FixedIndegree(indegree=self.CI)
-        if self.alpha != 2.0:
-            syn_IE = bp.dyn.ProjAlignPreMg(
-                pre=self.I,
-                post=self.E,
-                conn=conn_I,
-                weight=self.J_in_tot[: self.NE],
-                delay=self.delay,
-            )
-            syn_II = bp.dyn.ProjAlignPreMg(
-                pre=self.I,
-                post=self.I,
-                conn=conn_I,
-                weight=self.J_in_tot[self.NE :],
-                delay=self.delay,
-            )
-        else:
-            syn_IE = bp.dyn.ProjAlignFixed(
-                pre=self.I, post=self.E, conn=conn_I, weight=self.J_in, delay=self.delay
-            )
-            syn_II = bp.dyn.ProjAlignFixed(
-                pre=self.I, post=self.I, conn=conn_I, weight=self.J_in, delay=self.delay
-            )
-
-        # Add synapses to the network
-        self.EE_syn = syn_EE
-        self.EI_syn = syn_EI
-        self.IE_syn = syn_IE
-        self.II_syn = syn_II
-
-    def add_constant_input(self):
-        # Create constant input
-        self.Ein = bp.inputs.ConstantInput(self.E.num, self.constant_input_amplitude)
-        self.Iin = bp.inputs.ConstantInput(self.I.num, self.constant_input_amplitude)
-        # Add input to neurons
-        self.E.input = self.Ein.current
-        self.I.input = self.Iin.current
-
-    def update(self, tdi):
-        self.E.update(tdi)
-        self.I.update(tdi)
-        self.EE_syn.update(tdi)
-        self.EI_syn.update(tdi)
-        self.IE_syn.update(tdi)
-        self.II_syn.update(tdi)
-        self.Ein.update(tdi)
-        self.Iin.update(tdi)
+        # define input variables given to E/I populations
+        self.Ein = bp.dyn.InputVar(self.E.varshape)
+        self.Iin = bp.dyn.InputVar(self.I.varshape)
+        self.E.add_inp_fun("", self.Ein)
+        self.I.add_inp_fun("", self.Iin)
