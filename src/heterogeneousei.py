@@ -92,7 +92,7 @@ class HeterogenousCircuit(bp.Network):
             V_th=theta,
             R=1.0,
             tau=tauMem,
-       d     V_initializer=bp.init.Constant(10.0),
+            V_initializer=bp.init.Constant(10.0),
             tau_ref=2.0,
             ref_var=True,
             method=method,

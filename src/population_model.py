@@ -1,12 +1,20 @@
 from neurons import FNSNeuron, LIFNeuron
-from synapses import Synapse, maybe_initializer
+from synapses import Synapse, maybe_initializer, DeltaSynapse
 from positions import ClusteredPositions, Positions
 import numpy as np
+import types
 
 import brainpy as bp
 from abc import ABC, abstractmethod
 
 # * Just two populations, coupled with heavy tailed synaptic weights or degree distributions
+
+
+def fixedprob_to_dict(self):
+    return {"prob": self.prob}
+
+
+bp.connect.FixedProb.to_dict = fixedprob_to_dict
 
 
 class FNSPopulations(bp.Network):
@@ -52,16 +60,16 @@ class FNSPopulations(bp.Network):
         delay_step = int(2.0 // bp.share["dt"])
         JE = 1 / bp.math.sqrt(prob * np.prod(num_exc))
         JI = -1 / bp.math.sqrt(prob * np.prod(num_inh))
-        self.E2E = bp.synapses.Delta(
+        self.E2E = DeltaSynapse(
             self.E, self.E, conn_E2E, delay_step=delay_step, g_max=JE
         )
-        self.E2I = bp.synapses.Delta(
+        self.E2I = DeltaSynapse(
             self.E, self.I, conn_E2I, delay_step=delay_step, g_max=JE
         )
-        self.I2E = bp.synapses.Delta(
+        self.I2E = DeltaSynapse(
             self.I, self.E, conn_I2E, delay_step=delay_step, g_max=JI
         )
-        self.I2I = bp.synapses.Delta(
+        self.I2I = DeltaSynapse(
             self.I, self.I, conn_I2I, delay_step=delay_step, g_max=JI
         )
 
