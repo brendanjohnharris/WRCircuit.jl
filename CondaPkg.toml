@@ -1,8 +1,10 @@
 channels = ["nvidia", "anaconda"]
 
 [deps]
-cuda-nvcc = "==12.4" # Try match this to your system CUDA version
-cudnn = "==9.3"
+cuda-nvcc = ">=12.1"
+# cudnn = ">=9.1,<10"
+cudatoolkit = ""
+nccl = ">=2.18"
 ipykernel = ""
 numpy = "<2"
 matplotlib = ""
@@ -17,3 +19,4 @@ jax = "==0.4.29"
 jaxlib = "@https://storage.googleapis.com/jax-releases/cuda12/jaxlib-0.4.29+cuda12.cudnn91-cp311-cp311-manylinux2014_x86_64.whl"
 taichi = "==1.7.0"
 pydot = "==3"
+nvidia-cudnn-cu12 = ""
