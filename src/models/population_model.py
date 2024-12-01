@@ -1,6 +1,6 @@
-from neurons import FNSNeuron, LIFNeuron
-from synapses import Synapse, maybe_initializer, DeltaSynapse
-from positions import ClusteredPositions, Positions
+from ..neurons import FNSNeuron, LIFNeuron
+from ..synapses import Synapse, maybe_initializer, DeltaSynapse
+from ..positions import ClusteredPositions, Positions
 import numpy as np
 import types
 
@@ -52,7 +52,7 @@ class FNSPopulations(bp.Network):
         # Connectivity topology
         prob = 0.1
         conn_E2E = bp.connect.FixedProb(prob=prob)
-        conn_E2I = bp.connect.FixedProb(prob=prob)
+        conn_E2I = bp.connect.FixedProb(prob=prob * 6)
         conn_I2E = bp.connect.FixedProb(prob=prob)
         conn_I2I = bp.connect.FixedProb(prob=prob)
 

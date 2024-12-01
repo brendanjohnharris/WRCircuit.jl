@@ -78,6 +78,6 @@ jobs:
         shell: julia --project=docs --color=yes {0}
         run: |
           using Documenter: DocMeta, doctest
-          using DistributedVisualCortex
-          DocMeta.setdocmeta!(DistributedVisualCortex, :DocTestSetup, :(using DistributedVisualCortex); recursive=true)
-          doctest(DistributedVisualCortex)
+          using Dewdrop
+          DocMeta.setdocmeta!(Dewdrop, :DocTestSetup, :(using Dewdrop); recursive=true)
+          doctest(Dewdrop)

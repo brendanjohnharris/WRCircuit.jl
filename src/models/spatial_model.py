@@ -29,11 +29,8 @@ from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
-from neurons import FNSNeuron
-from positions import *
-
-
-
+from ..neurons import FNSNeuron
+from ..positions import *
 
 
 def remove_key(d, key):

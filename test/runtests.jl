@@ -1,6 +1,6 @@
-using DistributedVisualCortex
+using Dewdrop
 using Test
 
-@testset "DistributedVisualCortex.jl" begin
+@testset "Dewdrop.jl" begin
     # Write your tests here.
 end

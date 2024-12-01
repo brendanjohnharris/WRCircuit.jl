@@ -25,7 +25,7 @@ from brainpy import odeint, sdeint, JointEq
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
-from neurons import *
+from ..neurons import *
 
 
 class EmbeddedLif(bp.dyn.LifRef):

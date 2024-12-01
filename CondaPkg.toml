@@ -1,8 +1,8 @@
 channels = ["nvidia", "anaconda"]
 
 [deps]
-cuda-nvcc = ""
-cudnn = ">=9"
+cuda-nvcc = "==12.4" # Try match this to your system CUDA version
+cudnn = "==9.3"
 ipykernel = ""
 numpy = "<2"
 matplotlib = ""

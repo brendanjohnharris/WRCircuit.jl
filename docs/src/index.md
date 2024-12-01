@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = DistributedVisualCortex
+CurrentModule = Dewdrop
 ```
 
-# DistributedVisualCortex
+# Dewdrop
 
-Documentation for [DistributedVisualCortex](https://github.com/brendanjohnharris/DistributedVisualCortex.jl).
+Documentation for [Dewdrop](https://github.com/brendanjohnharris/Dewdrop.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [DistributedVisualCortex]
+Modules = [Dewdrop]
 ```

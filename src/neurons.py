@@ -30,8 +30,8 @@ from brainpy import odeint, sdeint, JointEq
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
-from positions import *
-from synapses import maybe_initializer, Synapse
+from .positions import *
+from .synapses import maybe_initializer, Synapse
 
 
 def maybe_default_embedding(self, embedding):
