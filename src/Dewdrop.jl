@@ -1,6 +1,10 @@
 module Dewdrop
+using CUDA
+using cuDNN
 using PythonCall
 import PythonCall: pycopy!
+
+export convert2
 
 begin # * Python imports
     const sys = PythonCall.pynew()
@@ -12,8 +16,9 @@ begin # * Python imports
     const jax = PythonCall.pynew()
     const jax_lib = PythonCall.pynew()
     const xla_bridge = PythonCall.pynew()
+    const numpy = PythonCall.pynew()
 
-    export brainpy, neurons, positions, synapses, models
+    export brainpy, neurons, positions, synapses, models, numpy
 end
 
 function __init__()
@@ -28,11 +33,14 @@ function __init__()
     pycopy!(positions, pyimport("src.positions"))
     pycopy!(synapses, pyimport("src.synapses"))
     pycopy!(models, pyimport("src.models"))
+    pycopy!(numpy, pyimport("numpy"))
 
-    # begin # * CUDA checks
-    # _jax_backend = xla_bridge.get_backend().platform
-    #     _jax_backend == "gpu" || (@warn "JAX is not using the GPU")
-    # end
+    begin # * CUDA checks
+        CUDA.has_cuda() || (@warn "CUDA is not available")
+
+        _jax_backend = xla_bridge.get_backend().platform
+        pyconvert(String, _jax_backend) == "gpu" || (@warn "JAX is not using the GPU")
+    end
 end
 function _cudnn_version()
     jax._src.lib.cuda_versions.cudnn_get_version()
@@ -41,4 +49,7 @@ function _cudnn_build_version()
     jax._src.lib.cuda_versions.cudnn_build_version()
 end
 
+function convert2(x::Type)
+    Base.Fix1(pyconvert, x)
+end
 end # module
