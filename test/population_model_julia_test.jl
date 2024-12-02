@@ -9,7 +9,7 @@ using Dewdrop
 
 FNSPopulations = models.population_model.FNSPopulations
 
-Ne = (5, 5)
+Ne = (10, 10)
 Ni = prod(Ne) ÷ 4
 FNSnet = FNSPopulations(Ne, Ni)
 
@@ -26,7 +26,7 @@ if pyconvert(Bool, prod(FNSnet.E.size) ≤ 100)
     E2I = FNSnet.E2I.conn.require("conn_mat") |> convert2(Matrix{Bool})
     I2I = FNSnet.I2I.conn.require("conn_mat") |> convert2(Matrix{Bool})
 
-    fullconn = [E2E E2I; I2E I2I]
+    fullconn = [E2E E2I; I2E I2I]' # Python has columns first
 
     positions_E = FNSnet.E.positions |> convert2(Vector)  # num_E x 2
     positions_I = FNSnet.I.positions |> convert2(Vector) # num_I x 2
@@ -34,27 +34,23 @@ if pyconvert(Bool, prod(FNSnet.E.size) ≤ 100)
 
     node_colors = vcat(fill("green", ne), fill("red", ni))
 
-    # edges = Graphs.edges(G)
-    # edge_colors = map(Pair.(edges)) do (a, b)
-    #     if a <= ne && b <= ne
-    #         return colorant"cornflowerblue"
-    #     elseif a > ne && b > ne
-    #         return colorant"crimson"
-    #     else
-    #         return colorant"blue"
-    #     end
-    # end
+    intraconn = [E2E fill(false, size(E2I)); fill(false, size(I2E)) I2I]'
+    Gintra = SimpleDiGraph(intraconn)
+    edge_colors = fill((colorant"green", 0.1), size(intraconn))
+    edge_colors[(ne + 1):end, (ne + 1):end] .= [(colorant"crimson", 0.1)]
 
-    # edge_colors = fill((colorant"green", 0.1), size(fullconn))
-    # edge_colors[(ne + 1):end, (ne + 1):end] .= [(colorant"crimson", 0.1)]
-    # edge_colors[(ne + 1):end, 1:ne] .= [(colorant"cornflowerblue", 0.1)]
-    # edge_colors[1:ne, (ne + 1):end] .= [(colorant"cornflowerblue", 0.1)]
-
-    G = SimpleDiGraph(fullconn)
+    interconn = [fill(false, size(E2E)) E2I; I2E fill(false, size(I2I))]'
+    Ginter = SimpleDiGraph(interconn)
 
     f = Figure()
     ax = Axis(f[1, 1]; aspect = DataAspect())
-    p = graphplot!(ax, G; layout = fullpositions, node_color = node_colors)
+    pinter = graphplot!(ax, Ginter; layout = fullpositions, node_size = 0,
+                        edge_color = (colorant"cornflowerblue", 0.025),
+                        edge_plottype = :beziersegments, curve_distance = 1,
+                        curve_distance_usage = true)
+    pintra = graphplot!(ax, Gintra; layout = fullpositions, node_color = node_colors,
+                        edge_color = edge_colors[intraconn],
+                        edge_plottype = :beziersegments)
     hidespines!(ax)
     hidedecorations!(ax)
     f

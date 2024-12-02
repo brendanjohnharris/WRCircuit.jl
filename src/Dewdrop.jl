@@ -4,7 +4,7 @@ using cuDNN
 using PythonCall
 import PythonCall: pycopy!
 
-export convert2
+export convert2, jax_device
 
 begin # * Python imports
     const sys = PythonCall.pynew()
@@ -42,14 +42,11 @@ function __init__()
         pyconvert(String, _jax_backend) == "gpu" || (@warn "JAX is not using the GPU")
     end
 end
-function _cudnn_version()
-    jax._src.lib.cuda_versions.cudnn_get_version()
-end
-function _cudnn_build_version()
-    jax._src.lib.cuda_versions.cudnn_build_version()
-end
+_cudnn_version() = jax._src.lib.cuda_versions.cudnn_get_version()
+_cudnn_build_version() = jax._src.lib.cuda_versions.cudnn_build_version()
+convert2(x::Type) = Base.Fix1(pyconvert, x)
+jax_device() = xla_bridge.get_backend().platform |> convert2(String)
 
-function convert2(x::Type)
-    Base.Fix1(pyconvert, x)
-end
+include("ModelInterface.jl")
+
 end # module

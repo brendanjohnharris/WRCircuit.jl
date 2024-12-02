@@ -18,8 +18,29 @@ bp.connect.FixedProb.to_dict = fixedprob_to_dict
 
 
 class FNSPopulations(bp.Network):
-    def __init__(self, num_exc, num_inh, method="exp_auto"):
+    r"""
+    See Brunel 2000, "Dynamics of Sparsely Connected Networks of Excitatory and Inhibitory
+    Spiking Neurons"
+
+    Uses a fixed probability epsilon to connect all populations
+    """
+
+    def __init__(self, num, epsilon, D, nu, g, J):
         super().__init__()
+
+        # * Note that nu_thr = theta / (epsilon * Ne * J * tau)
+
+        self.epsilon = epsilon
+        self.D = D
+        self.nu = nu
+        self.g = g
+        self.J = J
+
+        num_inh = num // 5  # So exc form 0.8, inh form 0.2, 4:1 ratio
+        num_exc = num - num_inh
+
+        theta = 20  # mV
+        tau = 20  # ms
 
         # geometry
         exc_positions = ClusteredPositions((-1.5, 0), 1)
@@ -29,48 +50,87 @@ class FNSPopulations(bp.Network):
         self.E = LIFNeuron(
             size=num_exc,
             embedding=exc_positions,
-            V_rest=-60.0,
-            V_th=-50.0,
-            V_reset=-60.0,
-            tau=20.0,
-            tau_ref=5.0,
-            V_initializer=bp.init.Normal(-55.0, 2.0),
+            V_rest=0.0,  # For simple IF neuron in paper
+            V_th=theta,
+            V_reset=10.0,
+            R=1,
+            tau=tau,
+            tau_ref=2.0,
+            V_initializer=bp.init.Normal(0, 1.0),
         )
 
         # Create a population of inhibitory neurons
         self.I = LIFNeuron(
             size=num_inh,
             embedding=inh_positions,
-            V_rest=-60.0,
-            V_th=-50.0,
-            V_reset=-60.0,
-            tau=20.0,
-            tau_ref=5.0,
-            V_initializer=bp.init.Normal(-55.0, 2.0),
+            V_rest=0.0,
+            V_th=theta,
+            V_reset=10.0,
+            R=1,
+            tau=tau,
+            tau_ref=2.0,
+            V_initializer=bp.init.Normal(0, 1.0),
         )
-
-        # Connectivity topology
-        prob = 0.1
-        conn_E2E = bp.connect.FixedProb(prob=prob)
-        conn_E2I = bp.connect.FixedProb(prob=prob * 6)
-        conn_I2E = bp.connect.FixedProb(prob=prob)
-        conn_I2I = bp.connect.FixedProb(prob=prob)
 
         # Synapses
-        delay_step = int(2.0 // bp.share["dt"])
-        JE = 1 / bp.math.sqrt(prob * np.prod(num_exc))
-        JI = -1 / bp.math.sqrt(prob * np.prod(num_inh))
+        delay_step = int(D // bp.share["dt"])
+
+        JE = self.J
+        JI = -g * self.J
+
         self.E2E = DeltaSynapse(
-            self.E, self.E, conn_E2E, delay_step=delay_step, g_max=JE
+            self.E,
+            self.E,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JE,
         )
         self.E2I = DeltaSynapse(
-            self.E, self.I, conn_E2I, delay_step=delay_step, g_max=JE
+            self.E,
+            self.I,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JE,
         )
         self.I2E = DeltaSynapse(
-            self.I, self.E, conn_I2E, delay_step=delay_step, g_max=JI
+            self.I,
+            self.E,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JI,
         )
         self.I2I = DeltaSynapse(
-            self.I, self.I, conn_I2I, delay_step=delay_step, g_max=JI
+            self.I,
+            self.I,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JI,
+        )
+
+        # External population
+        self.ext = bp.dyn.PoissonGroup(
+            self.E.num,  # So that the average number of connections to each population matches Ce
+            nu,
+            keep_size=False,
+            sharding=None,
+            spk_type=None,
+            name=None,
+            mode=None,
+            seed=None,
+        )
+        self.ext2E = DeltaSynapse(
+            self.ext,
+            self.E,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JE,
+        )
+        self.ext2I = DeltaSynapse(
+            self.ext,
+            self.I,
+            bp.connect.FixedProb(prob=epsilon),
+            delay_step=delay_step,
+            g_max=JI,
         )
 
         # define input variables given to E/I populations
@@ -82,6 +142,11 @@ class FNSPopulations(bp.Network):
     def to_dict(self):
         return {
             self.__class__.__name__: {
+                "epsilon": self.epsilon,
+                "D": self.D,
+                "nu": maybe_initializer(self.nu),
+                "g": self.g,
+                "J": self.J,
                 "populations": {
                     "E": self.E.to_dict(),
                     "I": self.I.to_dict(),
