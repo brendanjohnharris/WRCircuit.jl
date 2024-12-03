@@ -13,12 +13,13 @@ begin # * Python imports
     const positions = PythonCall.pynew()
     const synapses = PythonCall.pynew()
     const models = PythonCall.pynew()
+    const running = PythonCall.pynew()
     const jax = PythonCall.pynew()
     const jax_lib = PythonCall.pynew()
     const xla_bridge = PythonCall.pynew()
     const numpy = PythonCall.pynew()
 
-    export brainpy, neurons, positions, synapses, models, numpy
+    export brainpy, neurons, positions, synapses, models, running, numpy
 end
 
 function __init__()
@@ -33,7 +34,15 @@ function __init__()
     pycopy!(positions, pyimport("src.positions"))
     pycopy!(synapses, pyimport("src.synapses"))
     pycopy!(models, pyimport("src.models"))
+    pycopy!(running, pyimport("src.running"))
     pycopy!(numpy, pyimport("numpy"))
+
+    # * Set default dt
+    if haskey(ENV, "BRAINPY_DT")
+        brainpy.math.set_dt(parse(Float64, ENV["BRAINPY_DT"]))
+    else
+        brainpy.math.set_dt(0.1)
+    end
 
     begin # * CUDA checks
         CUDA.has_cuda() || (@warn "CUDA is not available")

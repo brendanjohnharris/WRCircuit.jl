@@ -2,12 +2,11 @@ from ..neurons import FNSNeuron, LIFNeuron
 from ..synapses import Synapse, maybe_initializer, DeltaSynapse
 from ..positions import ClusteredPositions, Positions
 import numpy as np
+import jax.numpy as jnp
 import types
 
 import brainpy as bp
 from abc import ABC, abstractmethod
-
-# * Just two populations, coupled with heavy tailed synaptic weights or degree distributions
 
 
 def fixedprob_to_dict(self):
@@ -25,22 +24,27 @@ class FNSPopulations(bp.Network):
     Uses a fixed probability epsilon to connect all populations
     """
 
-    def __init__(self, num, epsilon, D, nu, g, J):
+    def __init__(self, N, epsilon=0.1, D=1.5, nu_hat=2, g=5, J=0.1):
         super().__init__()
 
         # * Note that nu_thr = theta / (epsilon * Ne * J * tau)
 
         self.epsilon = epsilon
         self.D = D
-        self.nu = nu
+        self.nu_hat = nu_hat  # Normalized input rate
         self.g = g
         self.J = J
 
-        num_inh = num // 5  # So exc form 0.8, inh form 0.2, 4:1 ratio
-        num_exc = num - num_inh
+        num_inh = N // 5
+        num_exc = N - num_inh
 
         theta = 20  # mV
         tau = 20  # ms
+        tau_ref = 2.0  # ms
+        self.nu_thr = (
+            1000 * theta / (epsilon * num_exc * J * tau)
+        )  # Tau is in milliseconds. *1000 to convert to Hz
+        self.nu = self.nu_hat * self.nu_thr
 
         # geometry
         exc_positions = ClusteredPositions((-1.5, 0), 1)
@@ -55,7 +59,7 @@ class FNSPopulations(bp.Network):
             V_reset=10.0,
             R=1,
             tau=tau,
-            tau_ref=2.0,
+            tau_ref=tau_ref,
             V_initializer=bp.init.Normal(0, 1.0),
         )
 
@@ -68,12 +72,13 @@ class FNSPopulations(bp.Network):
             V_reset=10.0,
             R=1,
             tau=tau,
-            tau_ref=2.0,
+            tau_ref=tau_ref,
             V_initializer=bp.init.Normal(0, 1.0),
         )
 
         # Synapses
-        delay_step = int(D // bp.share["dt"])
+        delay_step = D // bp.share["dt"]
+        delay_step = int(delay_step)
 
         JE = self.J
         JI = -g * self.J
@@ -110,7 +115,7 @@ class FNSPopulations(bp.Network):
         # External population
         self.ext = bp.dyn.PoissonGroup(
             self.E.num,  # So that the average number of connections to each population matches Ce
-            nu,
+            self.nu,
             keep_size=False,
             sharding=None,
             spk_type=None,
@@ -130,7 +135,7 @@ class FNSPopulations(bp.Network):
             self.I,
             bp.connect.FixedProb(prob=epsilon),
             delay_step=delay_step,
-            g_max=JI,
+            g_max=JE,
         )
 
         # define input variables given to E/I populations

@@ -1,4 +1,6 @@
 import numpy as np
+import jax
+import jax.numpy as jnp
 from itertools import product
 from abc import ABC, abstractmethod
 
@@ -9,7 +11,7 @@ class AbstractPositions(ABC):
         pass
 
     def cast_to_tuple(self, x):
-        if isinstance(x, (list, np.ndarray)):
+        if isinstance(x, (list, np.ndarray, jnp.ndarray)):
             return tuple(x)
         elif isinstance(x, tuple):
             return x
@@ -39,7 +41,7 @@ class GridPositions(AbstractPositions):
         grids = []
         for s, n in zip(self.domain, shape):
             offset = (s / n) / 2  # Offset to center the grid
-            grids.append(np.linspace(0 + offset, s + offset, n, endpoint=False))
+            grids.append(jnp.linspace(0 + offset, s + offset, n, endpoint=False))
         positions = list(product(*grids))
         return positions
 
@@ -53,7 +55,7 @@ class RandomPositions(AbstractPositions):
 
     def __call__(self, shape):
         shape = self.cast_to_tuple(shape)
-        total_positions = np.prod(shape)
+        total_positions = jnp.prod(shape)
         positions = []
         for s in self.domain:
             positions.append(np.random.uniform(0, s, total_positions))
@@ -79,7 +81,7 @@ class ClusteredPositions(AbstractPositions):
         # Convert polar coordinates to Cartesian coordinates
         x = self.center[0] + r * np.cos(theta)
         y = self.center[1] + r * np.sin(theta)
-        positions = list(zip(x, y))
+        positions = self.cast_to_tuple(list(zip(x, y)))
         return positions
 
     def to_dict(self):
