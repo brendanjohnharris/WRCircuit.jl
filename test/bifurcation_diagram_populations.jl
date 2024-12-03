@@ -14,7 +14,7 @@ using CairoMakie
 model = models.population_model.FNSPopulations
 
 begin # * Fixed parameters
-    N = 12500
+    N = 2500
     T = 1000.0
 end
 
@@ -35,8 +35,11 @@ begin # * Order parameters
     function cv(x::UnivariateSpikeTrain)
         ts = times(x[x])
         isis = diff(ts)
-        isempty(isis) && return 0.0 # No spikes, mean isi is Inf, say cv is 0
-        std(isis) / mean(isis)
+        if length(isis) < 2
+            return 0.0 # No spikes, mean isi is Inf, say cv is 0
+        else
+            return std(isis) / mean(isis)
+        end
     end
     function cv(X::MultivariateSpikeTrain)
         cv.(eachslice(X, dims = dims(X)[2:end]))
@@ -47,28 +50,20 @@ begin # * Sweep parameters
     order_parameter = cv
     population = :E
 
-    ν̂s = range(0, 4, length = 3) |> Dim{:ν̂}
-    gs = range(0, 8, length = 3) |> Dim{:g}
+    ν̂s = range(3, 4, length = 2) |> Dim{:ν̂}
+    gs = range(7, 8, length = 2) |> Dim{:g}
     params = ToolsArray(Iterators.product(N, ν̂s, gs) |> collect, (gs, ν̂s))
-    # params = map(params) do (N, ν̂, g)
-    #     (; N = N, nu_hat = ν̂, g = g)
-    # end
-    # params = params[:]
-    # params = map(keys(first(params))) do k
-    #     k => getindex.(params, [k])
-    # end |> Dict
     X = map(params) do (g, ν̂)
-        # PythonCall.GC.gc()
-        x = bpsolve(model(N; g, nu_hat = ν̂), T; populations = [:E, :I], vars = [:spike])
+        jax.clear_caches()
+        PythonCall.GIL.lock(GC.gc)
+        PythonCall.GC.gc() # Check these work with xla_bridge.get_backend().live_arrays()
+        m = model(N; g, nu_hat = ν̂)
+        x = bpsolve(m, T; populations = [:E, :I], vars = [:spike])
         mean(order_parameter(x[Population = At(population), Var = At(:spike)]))
     end
 end
 
-# begin
-#     running.run_parallel(model, params, 2; monitors = ["E.spike"], T, jit = true)
-# end
-
-if false # * Plot bifurcation diagram
+begin # * Plot bifurcation diagram
     f = Figure()
     ax = Axis(f[1, 1])
     heatmap!(ax, X)

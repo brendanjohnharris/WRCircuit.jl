@@ -34,5 +34,6 @@ function bpsolve(net::Py, time; populations = [:E, :I], vars = [:V], transient =
         Timeseries(t, Neuron(vs), x)[𝑡(OpenInterval(transient, Inf * u"s"))]
     end
     X = reshape(X, length(populations), length(vars))
-    ToolsArray(X, (Population(populations), Var(vars)))
+    X = ToolsArray(X, (Population(populations), Var(vars)))
+    return X
 end

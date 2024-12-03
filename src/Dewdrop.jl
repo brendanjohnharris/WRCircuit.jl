@@ -19,7 +19,7 @@ begin # * Python imports
     const xla_bridge = PythonCall.pynew()
     const numpy = PythonCall.pynew()
 
-    export brainpy, neurons, positions, synapses, models, running, numpy
+    export brainpy, neurons, positions, synapses, models, running, numpy, jax
 end
 
 function __init__()
