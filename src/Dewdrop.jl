@@ -1,5 +1,5 @@
 module Dewdrop
-using CUDA
+# using CUDA
 using cuDNN
 using PythonCall
 import PythonCall: pycopy!
@@ -45,7 +45,7 @@ function __init__()
     end
 
     begin # * CUDA checks
-        CUDA.has_cuda() || (@warn "CUDA is not available")
+        # CUDA.has_cuda() || (@warn "CUDA is not available")
 
         _jax_backend = xla_bridge.get_backend().platform
         pyconvert(String, _jax_backend) == "gpu" || (@warn "JAX is not using the GPU")
