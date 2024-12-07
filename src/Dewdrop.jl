@@ -1,5 +1,5 @@
 module Dewdrop
-# using CUDA
+using CUDA
 using cuDNN
 using PythonCall
 import PythonCall: pycopy!
@@ -37,6 +37,19 @@ function __init__()
     pycopy!(running, pyimport("src.running"))
     pycopy!(numpy, pyimport("numpy"))
 
+    if haskey(ENV, "DEWDROP_BACKEND")
+        backend = ENV["DEWDROP_BACKEND"]
+        if backend == "cpu"
+            jax.default_device = jax.devices("cpu")[0]
+            brainpy.math.set_platform("cpu")
+        elseif backend == "gpu"
+            jax.default_device = jax.devices("gpu")[0]
+            brainpy.math.set_platform("gpu")
+        else
+            @warn "Unknown Dewdrop.jl backend $backend"
+        end
+    end
+
     # * Set default dt
     if haskey(ENV, "BRAINPY_DT")
         brainpy.math.set_dt(parse(Float64, ENV["BRAINPY_DT"]))
@@ -45,8 +58,7 @@ function __init__()
     end
 
     begin # * CUDA checks
-        # CUDA.has_cuda() || (@warn "CUDA is not available")
-
+        CUDA.has_cuda() || (@warn "CUDA is not available")
         _jax_backend = xla_bridge.get_backend().platform
         pyconvert(String, _jax_backend) == "gpu" || (@warn "JAX is not using the GPU")
     end
@@ -57,5 +69,6 @@ convert2(x::Type) = Base.Fix1(pyconvert, x)
 jax_device() = xla_bridge.get_backend().platform |> convert2(String)
 
 include("ModelInterface.jl")
+include("Utils.jl")
 
 end # module
