@@ -10,6 +10,7 @@ using Unitful
 using Statistics
 using TimeseriesTools
 using CairoMakie
+using LinearAlgebra
 
 model = models.population_model.FNSPopulations
 
@@ -50,8 +51,8 @@ begin # * Sweep parameters
     order_parameter = cv
     population = :E
 
-    ν̂s = range(3, 4, length = 2) |> Dim{:ν̂}
-    gs = range(7, 8, length = 2) |> Dim{:g}
+    ν̂s = range(0, 4, length = 2) |> Dim{:ν̂}
+    gs = range(0, 8, length = 2) |> Dim{:g}
     params = ToolsArray(Iterators.product(N, ν̂s, gs) |> collect, (gs, ν̂s))
     X = map(params) do (g, ν̂)
         jax.clear_caches()
@@ -68,4 +69,39 @@ begin # * Plot bifurcation diagram
     ax = Axis(f[1, 1])
     heatmap!(ax, X)
     f
+end
+
+begin # * Particle swarm to resolve areas of detail
+    using Optim
+    using DifferentiationInterface
+    using FiniteDiff
+
+    function solve_pb(params)
+        tanh(params[1] - params[2])
+    end
+    global trace = []
+    function trace_pb(params)
+        x = solve_pb(params)
+        push!(trace, (params..., x))
+        x
+    end
+    xs = -2:0.01:2
+    ys = -2:0.01:2
+    zs = [solve_pb([x, y]) for x in xs, y in ys]
+    surface(xs, ys, zs)
+
+    xs = [-1, 1]
+    ys = [-1, 1]
+    FiniteDiff.finite_difference_jacobian(solve_pb, [-1.0, -1.0])
+    trace = []
+    function gradnorm(x)
+        -norm(FiniteDiff.finite_difference_jacobian(trace_pb, x))
+    end
+    # optimize(func, [-1.0, -1.0], ParticleSwarm(; n_particles = 3))
+    o = optimize(gradnorm, [-0.9, 1.0],
+                 ParticleSwarm(; lower = [-2.0, -2.0], upper = [2.0, 2.0], n_particles = 4))
+    # ......... finite difference gradient func.......
+    # ........optimize for maximum gradient.............
+    scatter!(Point3f.(trace))
+    current_figure()
 end
