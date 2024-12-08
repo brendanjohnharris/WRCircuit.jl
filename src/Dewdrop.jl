@@ -1,6 +1,8 @@
 module Dewdrop
-using CUDA
-using cuDNN
+using DrWatson
+# using CUDA
+# using cuDNN
+using Libdl
 using PythonCall
 import PythonCall: pycopy!
 
@@ -8,6 +10,7 @@ export convert2, jax_device
 
 begin # * Python imports
     const sys = PythonCall.pynew()
+    const os = PythonCall.pynew()
     const brainpy = PythonCall.pynew()
     const neurons = PythonCall.pynew()
     const positions = PythonCall.pynew()
@@ -18,13 +21,20 @@ begin # * Python imports
     const jax_lib = PythonCall.pynew()
     const xla_bridge = PythonCall.pynew()
     const numpy = PythonCall.pynew()
+    const gc = PythonCall.pynew()
 
     export brainpy, neurons, positions, synapses, models, running, numpy, jax
 end
 
 function __init__()
+    push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/"))
+    dlopen("libcudnn")
+
     pycopy!(sys, pyimport("sys"))
     sys.path.append(pwd())
+
+    pycopy!(os, pyimport("os"))
+    # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false" # For clusters/multiprocessing
 
     pycopy!(jax, pyimport("jax"))
     pycopy!(jax_lib, pyimport("jax.lib"))
@@ -36,6 +46,7 @@ function __init__()
     pycopy!(models, pyimport("src.models"))
     pycopy!(running, pyimport("src.running"))
     pycopy!(numpy, pyimport("numpy"))
+    pycopy!(gc, pyimport("gc"))
 
     if haskey(ENV, "DEWDROP_BACKEND")
         backend = ENV["DEWDROP_BACKEND"]
@@ -58,7 +69,7 @@ function __init__()
     end
 
     begin # * CUDA checks
-        CUDA.has_cuda() || (@warn "CUDA is not available")
+        # CUDA.has_cuda() || (@warn "CUDA is not available")
         _jax_backend = xla_bridge.get_backend().platform
         pyconvert(String, _jax_backend) == "gpu" || (@warn "JAX is not using the GPU")
     end
@@ -67,6 +78,11 @@ _cudnn_version() = jax._src.lib.cuda_versions.cudnn_get_version()
 _cudnn_build_version() = jax._src.lib.cuda_versions.cudnn_build_version()
 convert2(x::Type) = Base.Fix1(pyconvert, x)
 jax_device() = xla_bridge.get_backend().platform |> convert2(String)
+jax_live_arrays() = xla_bridge.get_backend().live_arrays()
+function clear_live_arrays()
+    [x.delete() for x in Dewdrop.jax_live_arrays()]
+    PythonCall.GC.gc()
+end
 
 include("ModelInterface.jl")
 include("Utils.jl")

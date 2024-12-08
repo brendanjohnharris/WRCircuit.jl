@@ -1,6 +1,7 @@
 using Dewdrop
+using CUDA
 using Test
 
-@testset "Dewdrop.jl" begin
+@testset "Jax gpu available" begin
     # Write your tests here.
 end

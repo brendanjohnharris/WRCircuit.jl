@@ -28,8 +28,8 @@ function bpsolve(net::Py, time; populations = [:E, :I], vars = [:V], transient =
     @assert last(t) ≈ lastt
     t = t .* u"ms" # Add time units
     t = t .+ step(t) |> 𝑡 # Correct for python starting at 0
-    X = [runner.mon[m].view() |> convert2(Matrix) for m in monitors]
-    X = map(X, ps) do x, (p, v)
+    _X = [runner.mon[m].view() |> convert2(Matrix) for m in monitors]
+    X = map(_X, ps) do x, (p, v)
         vs = Symbol.(["$p"] .* string.(1:size(x, 2)))
         Timeseries(t, Neuron(vs), x)[𝑡(OpenInterval(transient, Inf * u"s"))]
     end

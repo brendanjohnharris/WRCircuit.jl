@@ -4,7 +4,7 @@ from brainpy.connect import TwoEndConnector, All2All, One2One
 from brainpy.synapses import TwoEndConn, SynOut, SynSTP
 from brainpy.initialize import Initializer
 from brainpy.synouts import CUBA
-from typing import Union, Dict, Callable, Optional
+from typing import Union, Dict, Callable, Optional, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
@@ -31,6 +31,7 @@ from brainpy import share
 from brainpy.types import Shape, ArrayType
 from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
+from brainpy.initialize import parameter
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
@@ -102,7 +103,6 @@ class DeltaSynapse(TwoEndConn):
         super().__init__(
             name=name, pre=pre, post=post, conn=conn, output=output, stp=stp, mode=mode
         )
-
         # parameters
         self.stop_spike_gradient = stop_spike_gradient
         self.post_ref_key = post_ref_key
@@ -179,6 +179,56 @@ class DeltaSynapse(TwoEndConn):
 
         # update outputs
         return self.output(post_vs)
+
+    def _init_weights(
+        self,
+        weight: Union[float, ArrayType, Callable],
+        comp_method: str,
+        sparse_data: str = "csr",
+    ) -> Tuple[Union[float, ArrayType], ArrayType]:
+        if comp_method not in ["sparse", "dense"]:
+            raise ValueError(
+                f'"comp_method" must be in "sparse" and "dense", but we got {comp_method}'
+            )
+        if sparse_data not in ["csr", "ij", "coo"]:
+            raise ValueError(
+                f'"sparse_data" must be in "csr" and "ij", but we got {sparse_data}'
+            )
+        if self.conn is None:
+            raise ValueError(
+                f'Must provide "conn" when initialize the model {self.name}'
+            )
+
+        # connections and weights
+        if isinstance(self.conn, One2One):
+            weight = parameter(weight, (self.pre.num,), allow_none=False)
+            conn_mask = None
+
+        elif isinstance(self.conn, All2All):
+            weight = parameter(weight, (self.pre.num, self.post.num), allow_none=False)
+            conn_mask = None
+
+        else:
+            if comp_method == "sparse":
+                if sparse_data == "csr":
+                    conn_mask = self.conn.require("pre2post")
+                elif sparse_data in ["ij", "coo"]:
+                    conn_mask = self.conn.require("post_ids", "pre_ids")
+                else:
+                    ValueError(f"Unknown sparse data type: {sparse_data}")
+                weight = parameter(weight, conn_mask[0].shape, allow_none=False)
+            elif comp_method == "dense":
+                weight = parameter(
+                    weight, (self.pre.num, self.post.num), allow_none=False
+                )
+                conn_mask = self.conn.require("conn_mat")
+            else:
+                raise ValueError(f"Unknown connection type: {comp_method}")
+
+        # training weights # !!! EDIT IF WE WANT TO TRAIN
+        # if isinstance(self.mode, bm.TrainingMode):
+        #     weight = bm.TrainVar(weight)
+        return weight, conn_mask
 
     def to_dict(self):
         return {

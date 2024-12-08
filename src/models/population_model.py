@@ -83,31 +83,33 @@ class FNSPopulations(bp.Network):
         JE = self.J
         JI = -g * self.J
 
-        self.E2E = DeltaSynapse(
+        self.E2E = DeltaSynapse(  # * This is the slow part. Can we jax it?
             self.E,
             self.E,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(
+                prob=epsilon, allow_multi_conn=True
+            ),  # allow_multi_conn=True speeds up construction SO MUCH!!! Because it allows for jax
             delay_step=delay_step,
             g_max=JE,
         )
         self.E2I = DeltaSynapse(
             self.E,
             self.I,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
         )
         self.I2E = DeltaSynapse(
             self.I,
             self.E,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JI,
         )
         self.I2I = DeltaSynapse(
             self.I,
             self.I,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JI,
         )
@@ -126,14 +128,14 @@ class FNSPopulations(bp.Network):
         self.ext2E = DeltaSynapse(
             self.ext,
             self.E,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
         )
         self.ext2I = DeltaSynapse(
             self.ext,
             self.I,
-            bp.connect.FixedProb(prob=epsilon),
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
         )
