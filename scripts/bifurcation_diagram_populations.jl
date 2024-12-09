@@ -102,10 +102,13 @@ begin
                     parallel = false, backend = :Term)
 end
 begin
+    o = getindex.(first.(O), "firing_rate")
+end
+begin
     f = Figure()
     ax = Axis(f[1, 1])
     for ν in ν̂s
-        x = O[ν̂ = At(ν)]
+        x = o[ν̂ = At(ν)]
         lines!(ax, lookup(x, 1), parent(x))
     end
     f
@@ -113,6 +116,6 @@ end
 begin # * Plot bifurcation diagram
     f = Figure()
     ax = Axis(f[1, 1])
-    heatmap!(ax, O)
+    heatmap!(ax, log10.(ustripall(o).+eps())')
     f
 end
