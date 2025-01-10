@@ -116,6 +116,8 @@ end
 begin # * Plot bifurcation diagram
     f = Figure()
     ax = Axis(f[1, 1])
-    heatmap!(ax, log10.(ustripall(o).+eps())')
+    heatmap!(ax, log10.(ustripall(o) .+ eps())')
     f
 end
+
+save(f, plotdir("bifurcation_diagram_populations.pdf"))
