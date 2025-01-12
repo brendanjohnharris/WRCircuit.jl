@@ -16,11 +16,13 @@ begin # * Simulate
     N = 5000
     T = 1000.0
 
-    m = model(N; g = 4.0, nu_hat = 0.75, epsilon = 0.1, D = 1.5, J = 0.1)
-    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V])
+    m = model(N; g = 4.0, nu_hat = 0.99, epsilon = 0.1, D = 1.5, J = 0.1)
+    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :RI])
     V = X[Var = At(:V)]
+    RI = X[Var = At(:RI)]
     spikes = X[Var = At(:spike)]
     lines(V[1][1:1000, 1])
+    lines(RI[1][1:1000, 1])
 end
 
 # begin

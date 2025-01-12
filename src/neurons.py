@@ -366,6 +366,24 @@ class LIFNeuron(bp.dyn.LifRef):
         super().__init__(*args, **kwargs)
         maybe_default_embedding(self, embedding)
 
+    def reset_state(self, batch_size=None, **kwargs):
+        super().reset_state(batch_size, **kwargs)
+        self._RI = self.offset_scaling(
+            self.init_variable(ZeroInit(), batch_size)
+        )  # For tracking recurrent inputs
+        self.RI = self.offset_scaling(
+            self.init_variable(ZeroInit(), batch_size)
+        )  # For tracking recurrent inputs
+
+    def update(self, x=None):
+        x = self._RI.value
+        self.RI.value = x  # Store recurrent inputs
+        self._RI = self.offset_scaling(
+            self.init_variable(ZeroInit(), None)
+        )  # reset recurrent input cache
+        self.V.value += x
+        return super().update()
+
     def to_dict(
         self,
         keys=[

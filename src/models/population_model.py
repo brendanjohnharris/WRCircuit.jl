@@ -83,6 +83,8 @@ class FNSPopulations(bp.Network):
         JE = self.J
         JI = -g * self.J
 
+        output = bp.synouts.CUBA(target_var="_RI")
+
         self.E2E = DeltaSynapse(  # * This is the slow part. Can we jax it?
             self.E,
             self.E,
@@ -91,6 +93,7 @@ class FNSPopulations(bp.Network):
             ),  # allow_multi_conn=True speeds up construction SO MUCH!!! Because it allows for jax
             delay_step=delay_step,
             g_max=JE,
+            output=output,
         )
         self.E2I = DeltaSynapse(
             self.E,
@@ -98,6 +101,7 @@ class FNSPopulations(bp.Network):
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
+            output=output,
         )
         self.I2E = DeltaSynapse(
             self.I,
@@ -105,6 +109,7 @@ class FNSPopulations(bp.Network):
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JI,
+            output=output,
         )
         self.I2I = DeltaSynapse(
             self.I,
@@ -112,6 +117,7 @@ class FNSPopulations(bp.Network):
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JI,
+            output=output,
         )
 
         # External population
@@ -131,6 +137,7 @@ class FNSPopulations(bp.Network):
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
+            output=output,
         )
         self.ext2I = DeltaSynapse(
             self.ext,
@@ -138,6 +145,7 @@ class FNSPopulations(bp.Network):
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
+            output=output,
         )
 
         # define input variables given to E/I populations
