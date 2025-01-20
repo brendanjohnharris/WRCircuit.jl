@@ -18,8 +18,8 @@ using USydClusters
 using Term
 using SparseArrays
 
-model = models.population_model.FNSPopulations
-modelname = "Brunel2000"
+model = models.balanced.FNSPopulations
+modelname = "Balanced"
 
 begin # * Fixed parameters
     N = 50000
@@ -40,7 +40,7 @@ if false # * Start procs
         @everywhere using PythonCall
         @everywhere using Statistics
         @everywhere using TimeseriesTools
-        @everywhere model = models.population_model.FNSPopulations
+        @everywhere model = models.balanced.FNSPopulations
     end
 
     X = pmap(params) do (g, ν̂)
@@ -72,7 +72,7 @@ if false
             ENV["JULIA_CONDAPKG_BACKEND"] = "Null" # To make loading faster
             ENV["JULIA_PYTHONCALL_EXE"] = projectdir(".CondaPkg", "env", "bin", "python")
             using Dewdrop
-            model = models.population_model.FNSPopulations
+            model = models.balanced.FNSPopulations
             m = model($N; g = $g, nu_hat = $ν̂)
             x = bpsolve(m, $T; populations = [:E], vars = [:spike])
             save(joinpath($folder, savename(Dict("g" => $g, "ν̂" => $ν̂), "jld2")),

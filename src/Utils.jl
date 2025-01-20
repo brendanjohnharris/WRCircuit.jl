@@ -3,7 +3,7 @@ using Normalization
 using StatsBase
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts
+       structurefunction, histcounts, timebins
 
 function _preamble()
     quote
@@ -13,12 +13,14 @@ function _preamble()
         using Statistics
         using TimeseriesTools
         using CairoMakie
+        using Foresight
         using LinearAlgebra
         using Distributed
         using Term
         using SparseArrays
         using MeanSquaredDisplacement
         using Distributions
+        using StableDistributions
     end
 end
 macro preamble()
@@ -115,3 +117,46 @@ function histcounts(x, edges)
     y = H.weights ./ N
     return ToolsArray(y, Dim{:bin}(centers))
 end
+
+# * Move to TimeseriesTools
+function timebins(x::RegularTimeSeries, τ::Number)
+    un = unit(eltype(times(x)))
+    if unit(τ) != un && unit(τ) == NoUnits
+        τ = τ * un
+    end
+    tbins = range(first(times(x)), last(times(x)), step = τ)
+    tbins = [i .. i + τ for i in tbins]
+    x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
+end
+function TimeseriesTools.coarsegrain(x::RegularTimeSeries, τ::Real)
+    negdims = setdiff(1:ndims(x), dimnum(x, 𝑡))
+    x = timebins(x, τ)
+    x = eachslice.(x; dims = negdims |> Tuple) |> stack
+    x = permutedims(x, circshift(1:ndims(x), -1))
+end
+TimeseriesTools.coarsegrain(x::UnivariateRegular, τ::Number) = timebins(x, τ)
+
+# import StableDistributions.fit
+# function clampedfit(::Type{<:Stable}, x::AbstractArray{<:Real})
+#     α₀, _β₀, σ₀, δ₀ = fit_quantile(Stable, x)
+#     u = exp.(LinRange(α₀ > 1 ? -2 : 10α₀ - 12, 0, 10))
+#     ecf = [mean(cis(t * (val - δ₀) / σ₀) for val in x) for t in u] # ecf of normalized data
+#     r, θ = abs.(ecf), angle.(ecf)
+
+#     mU, mR = [ones(10) -log.(u)], -log.(-log.(r))
+#     b, αₑₛₜ = (mU' * mU) \ (mU' * mR) # ols regression
+
+#     αₑₛₜ >= 2 && return convert(Stable, fit(Normal, x))
+
+#     σ₁ = exp(b / αₑₛₜ)
+#     η(u) = tan(αₑₛₜ * π / 2) * (u - u^αₑₛₜ) # u > 0
+#     mΘ = [η.(u) u]
+#     c, δ₁ = (mΘ' * mΘ) \ (mΘ' * θ) # ols regression
+#     βₑₛₜ = -c / exp(b)
+#     βₑₛₜ = clamp(βₑₛₜ, -1, 1)
+#     μ₁ = δ₁ - βₑₛₜ * σ₁ * tan(αₑₛₜ * π / 2) # back to type-1 parametrization
+#     σₑₛₜ = σ₀ * σ₁ # unnormalize
+#     μₑₛₜ = σ₀ * μ₁ + δ₀ # unnormalize
+
+#     return Stable(αₑₛₜ, βₑₛₜ, σₑₛₜ, μₑₛₜ)
+# end

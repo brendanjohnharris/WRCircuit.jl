@@ -8,7 +8,7 @@ using PythonCall
 using Dewdrop
 using TimeseriesTools
 
-FNSPopulations = models.population_model.FNSPopulations
+FNSPopulations = models.balanced.FNSPopulations
 
 begin # * Model
     N = 12500

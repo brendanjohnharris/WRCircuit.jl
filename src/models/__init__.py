@@ -1,2 +1,3 @@
-from .population_model import *
+from .balanced import *
+from .heterogeneous import *
 from .spatial_model import *

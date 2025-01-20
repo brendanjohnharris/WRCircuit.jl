@@ -16,7 +16,7 @@ def fixedprob_to_dict(self):
 bp.connect.FixedProb.to_dict = fixedprob_to_dict
 
 
-class FNSPopulations(bp.Network):
+class Balanced(bp.Network):
     r"""
     See Brunel 2000, "Dynamics of Sparsely Connected Networks of Excitatory and Inhibitory
     Spiking Neurons"

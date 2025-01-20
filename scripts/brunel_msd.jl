@@ -8,21 +8,39 @@ using DrWatson
 DrWatson.@quickactivate
 using Dewdrop
 Dewdrop.@preamble
+set_theme!(foresight(:physics))
 
-model = models.population_model.FNSPopulations
-modelname = "Brunel2000"
+model = models.balanced.FNSPopulations
+modelname = "Balanced"
 
 begin # * Simulate
-    N = 5000
-    T = 1000.0
+    N = 100000
+    T = 1500.0
 
-    m = model(N; g = 4.0, nu_hat = 0.99, epsilon = 0.1, D = 1.5, J = 0.1)
+    m = model(N; g = 4.0, nu_hat = 1, epsilon = 0.1, D = 1.5, J = 0.1)
     X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :RI])
     V = X[Var = At(:V)]
     RI = X[Var = At(:RI)]
     spikes = X[Var = At(:spike)]
     lines(V[1][1:1000, 1])
-    lines(RI[1][1:1000, 1])
+    # lines(RI[1][1:100, 1])
+end
+begin
+    f = TwoPanel()
+    τ = 1 # ms
+    for i in 1:2
+        syn = coarsegrain(RI[i], τ) .|> sum
+        syn = Iterators.flatten(syn) |> collect
+        ax = Axis(f[1, i]; yscale = log10, limits = (nothing, (1e-7, nothing)))
+        ziggurat!(syn; bins = 50, normalization = :pdf)
+        D = fit(Normal, syn)
+        xs = range(extrema(syn)...; length = 500)
+        lines!(ax, xs, pdf.(D, xs); color = crimson, linestyle = :dash)
+        D = fit(Stable, syn)
+        D = Stable(D.α, 0, D.σ, D.μ)
+        lines!(ax, xs, pdf.(D, xs); color = cucumber, linestyle = :dash)
+    end
+    f
 end
 
 # begin
@@ -80,36 +98,38 @@ if false
     f
 end
 
-begin
-    x = V[Population = At(:E)]
-    τ = 100 # lag 0 difference
-    Δ = structurefunction(x, τ)
-    # Δ = Δ[abs.(Δ) .< 5]
-    hist(Δ[:]; bins = 100)
-end
+if false
+    begin
+        x = V[Population = At(:E)]
+        τ = 100 # lag 0 difference
+        Δ = structurefunction(x, τ)
+        # Δ = Δ[abs.(Δ) .< 5]
+        hist(Δ[:]; bins = 100)
+    end
 
-begin
-    x = V[Population = At(:E)]
-    τs = 1:1:200
-    Δ = structurefunction(x, τs)
-    edges = -3:0.1:3
-    H = progressmap(Δ) do x
-        histcounts(x, edges)
+    begin
+        x = V[Population = At(:E)]
+        τs = 1:1:200
+        Δ = structurefunction(x, τs)
+        edges = -3:0.1:3
+        H = progressmap(Δ) do x
+            histcounts(x, edges)
+        end
+        H = ToolsArray(H, 𝑡(τs)) |> stack |> transpose
+        H = H ./ maximum(H, dims = 2)
+        heatmap(H)
     end
-    H = ToolsArray(H, 𝑡(τs)) |> stack |> transpose
-    H = H ./ maximum(H, dims = 2)
-    heatmap(H)
-end
-begin
-    x = V[Population = At(:E)]
-    τs = 1:50
-    Δ = structurefunction(x, τs)
-    edges = -2.5:0.1:3
-    H = progressmap(Δ) do x
-        histcounts(x, edges)
+    begin
+        x = V[Population = At(:E)]
+        τs = 1:50
+        Δ = structurefunction(x, τs)
+        edges = -2.5:0.1:3
+        H = progressmap(Δ) do x
+            histcounts(x, edges)
+        end
+        H = ToolsArray(H, 𝑡(τs)) |> stack |> transpose
+        # H = H ./ maximum(H, dims = 2)
+        heatmap(log10.(H))
+        lines(H[50, :] .+ eps(); axis = (; yscale = log10))
     end
-    H = ToolsArray(H, 𝑡(τs)) |> stack |> transpose
-    # H = H ./ maximum(H, dims = 2)
-    heatmap(log10.(H))
-    lines(H[50, :] .+ eps(); axis = (; yscale = log10))
 end
