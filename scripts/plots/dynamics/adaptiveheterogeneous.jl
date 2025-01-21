@@ -10,8 +10,8 @@ using Dewdrop
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
-model = models.balanced.Balanced
-modelname = "Balanced"
+model = models.AdaptiveHeterogeneous
+modelname = "AdaptiveHeterogeneous"
 
 begin # * Simulate
     N = 50000
@@ -19,6 +19,7 @@ begin # * Simulate
 
     m = model(N; g = 4.5, nu_hat = 0.9, epsilon = 0.1, D = 1.5, J = 0.1) # Try 4.0, nu_hat = 1.0 for gaussian
     X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input])
+
     V = X[Var = At(:V)]
     input = X[Var = At(:input)]
     spikes = X[Var = At(:spike)]
@@ -58,7 +59,7 @@ begin # * Voltage traces
 end
 begin # * Synaptic input distribution
     τ = 1 # ms
-    syn = coarsegrain(input[Population = At(pop)], τ) .|> sum
+    syn = coarsegrain(RI[Population = At(pop)], τ) .|> sum
     syn = Iterators.flatten(syn) |> collect
     ax = Axis(gs[2]; yscale = log10, limits = (nothing, (1e-7, 1)))
     ziggurat!(syn; bins = 50, normalization = :pdf, color = Cycled(1))

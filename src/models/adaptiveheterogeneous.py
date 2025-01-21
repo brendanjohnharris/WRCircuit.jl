@@ -16,14 +16,7 @@ def fixedprob_to_dict(self):
 bp.connect.FixedProb.to_dict = fixedprob_to_dict
 
 
-class Balanced(bp.Network):
-    r"""
-    See Brunel 2000, "Dynamics of Sparsely Connected Networks of Excitatory and Inhibitory
-    Spiking Neurons"
-
-    Uses a fixed probability epsilon to connect all populations
-    """
-
+class AdaptiveHeterogeneous(bp.Network):
     def __init__(self, N, epsilon=0.1, D=1.5, nu_hat=2, g=5, J=0.1):
         super().__init__()
 
@@ -83,15 +76,42 @@ class Balanced(bp.Network):
         JE = self.J
         JI = -g * self.J
 
-        self.E2E = DeltaSynapse(  # * This is the slow part. Can we jax it?
+        self.E2E = DeltaSynapse(
             self.E,
             self.E,
-            bp.connect.FixedProb(
-                prob=epsilon, allow_multi_conn=True
-            ),  # allow_multi_conn=True speeds up construction SO MUCH!!! Because it allows for jax
+            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
             delay_step=delay_step,
             g_max=JE,
         )
+        # self.E2E = Synapse(
+        #     pre=self.E,
+        #     post=self.E,
+        #     delay=D,
+        #     J=JE,
+        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
+        # )
+        # self.E2I = Synapse(
+        #     self.E,
+        #     self.I,
+        #     delay=D,
+        #     J=JE,
+        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
+        # )
+        # self.I2E = Synapse(
+        #     self.I,
+        #     self.E,
+        #     delay=D,
+        #     J=JI,
+        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
+        # )
+        # self.I2I = Synapse(
+        #     self.I,
+        #     self.I,
+        #     delay=D,
+        #     J=JI,
+        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
+        # )
+
         self.E2I = DeltaSynapse(
             self.E,
             self.I,

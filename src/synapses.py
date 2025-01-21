@@ -90,7 +90,7 @@ class DeltaSynapse(TwoEndConn):
         pre: NeuDyn,
         post: NeuDyn,
         conn: Union[TwoEndConnector, ArrayType, Dict[str, ArrayType]],
-        output: SynOut = CUBA(target_var="V"),
+        output: SynOut = CUBA(target_var="input"),
         stp: Optional[SynSTP] = None,
         comp_method: str = "sparse",
         g_max: Union[float, ArrayType, Initializer, Callable] = 1.0,
