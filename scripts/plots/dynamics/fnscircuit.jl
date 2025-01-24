@@ -10,14 +10,15 @@ using Dewdrop
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
-model = models.AdaptiveHeterogeneous
-modelname = "AdaptiveHeterogeneous"
+model = models.FNScircuit
+modelname = "FNScircuit"
 
 begin # * Simulate
-    N = 5000
+    m = model(; gamma = 4, g = 4)#; epsilon = 0.1, J = 0.1) # Try 4.0, nu_hat = 1.0 for gaussian
+    m.to_dict()
+end
+begin
     T = 1000.0
-
-    m = model(N; epsilon = 0.1, J = 0.1) # Try 4.0, nu_hat = 1.0 for gaussian
     X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input, :g_K])
 
     V = X[Var = At(:V)]

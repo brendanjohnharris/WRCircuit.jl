@@ -155,19 +155,17 @@ class FNSNeuron(GradNeuDyn):
         scaling: Optional[bm.Scaling] = None,
         # neuron parameters
         C: Union[float, ArrayType, Callable] = 0.25,  # nF
-        g_L: Union[float, ArrayType, Callable] = 16.7,  # nS
+        g_L: Union[float, ArrayType, Callable] = 0.0167,  # mS
         V_L: Union[float, ArrayType, Callable] = -70.0,  # mV
         V_K: Union[float, ArrayType, Callable] = -85.0,  # mV
         V_th: Union[float, ArrayType, Callable] = -50.0,  # mV
         V_rt: Union[float, ArrayType, Callable] = -60.0,  # mV
         tau_ref: Union[float, ArrayType, Callable] = 4.0,  # ms
         tau_K: Union[float, ArrayType, Callable] = 80.0,  # ms
-        Delta_g_K: Union[float, ArrayType, Callable] = 10.0,  # nS
+        Delta_g_K: Union[float, ArrayType, Callable] = 0.01,  # mS
         embedding: Union[None, AbstractPositions] = None,
         V_initializer: Union[Callable, ArrayType] = ZeroInit(),
         g_K_initializer: Union[Callable, ArrayType] = ZeroInit(),
-        # noise
-        noise: Union[float, ArrayType, Callable] = None,
     ):
         super().__init__(
             size=size,
@@ -201,21 +199,16 @@ class FNSNeuron(GradNeuDyn):
         self._g_K_initializer = is_initializer(g_K_initializer)
 
         # integral
-        self.noise = init_noise(noise, self.varshape, num_vars=2)
-        if self.noise is not None:
-            self.integral = sdeint(method=self.method, f=self.derivative, g=self.noise)
-        else:
-            self.integral = odeint(method=method, f=self.derivative)
+        self.integral = odeint(method=method, f=self.derivative)
 
         # variables
         if init_var:
             self.reset_state(self.mode)
 
     def dV(self, V, t, g_K, I_ext):
-        I_ext = self.sum_current_inputs(V, init=I_ext)
         I_K = -g_K * (V - self.V_K)
-        dVdt = (-self.g_L * (V - self.V_L) + I_K + I_ext) / self.C
-        return dVdt
+        dV = (-self.g_L * (V - self.V_L) + I_K + I_ext) / self.C
+        return dV
 
     def dg_K(self, g_K, t):
         dg_Kdt = -g_K / self.tau_K
@@ -233,6 +226,9 @@ class FNSNeuron(GradNeuDyn):
         )
         self.t_last_spike = self.init_variable(bm.ones, batch_size)
         self.t_last_spike.fill_(-1e8)
+        self.input = variable_(
+            bm.zeros, self.varshape, batch_size
+        )  # Track current inputs
 
     def update(self, I_ext=None):
         t = share.load("t")
@@ -242,7 +238,8 @@ class FNSNeuron(GradNeuDyn):
 
         # integrate variables
         V, g_K = self.integral(self.V.value, self.g_K.value, t, I_ext, dt)
-        V += self.sum_delta_inputs()
+        I_rec = self.sum_delta_inputs()
+        V += I_rec
 
         # refractory period
         refractory = (t - self.t_last_spike) <= self.tau_ref
@@ -281,10 +278,17 @@ class FNSNeuron(GradNeuDyn):
         # update variables
         self.V.value = V
         self.g_K.value = g_K
+        self.input.value = I_rec
         self.spike.value = spike
         self.t_last_spike.value = t_last_spike
 
         return spike
+
+    def clear_input(self):
+        self.input.value = bm.zeros_like(self.input)
+
+    def return_info(self):
+        return self.spike
 
     def to_dict(
         self,
@@ -301,6 +305,7 @@ class FNSNeuron(GradNeuDyn):
             "embedding",
             "_V_initializer",
             "_g_K_initializer",
+            "size",
         ],
     ):
         out = {
@@ -375,14 +380,10 @@ class LIFNeuron(bp.dyn.LifRef):
             self.input = variable_(bm.zeros, self.varshape, batch_size)
 
     def update(self, x=None):
-        if self.input_var:
-            if x is not None:
-                self.input += x
-            x = self.input.value
-        else:
-            x = 0.0 if x is None else x
-        self.V.value += x
-        return super().update()
+        self.input = (
+            self.sum_current_inputs() + self.sum_delta_inputs()
+        )  # Do we need to worry about R?
+        return super().update(x)
 
     def clear_input(self):
         if self.input_var:

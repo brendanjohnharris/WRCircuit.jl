@@ -14,7 +14,7 @@ model = models.balanced.Balanced
 modelname = "Balanced"
 
 begin # * Simulate
-    N = 50000
+    N = 500
     T = 1500.0
 
     m = model(N; g = 4.5, nu_hat = 0.9, epsilon = 0.1, D = 1.5, J = 0.1) # Try 4.0, nu_hat = 1.0 for gaussian
@@ -33,19 +33,7 @@ begin # Spike raster
     # First do spike raster with firing rate
     ax = Axis(gs[1][1, 1])
     x = spiketimes(spikes[Population = At(pop)][𝑡 = T][:, 1:1000])
-
-    # λ = coarsegrain(spikes[1][𝑡 = T], 10)
-    # dt = λ |> times |> first |> IntervalSets.width
-    # λ = sum.(λ) ./ dt
-    # λ = mean(λ, dims = 2) # Mean firing rate over all neurons
-    # λ = dropdims(λ; dims = Neuron)
-    # ts = times(λ) .|> mean
-    # λ = uconvert.(u"s^-1", λ)
-    # λs = repeat(λ, 1, length(x)) |> ustripall # Make a heatmap
-    # heatmap!(ax, ustripall(ts), 1:length(x), λs; colorrange = (0, maximum(λs)),
-    #          colormap = seethrough(pelagic, 0.1))
-
-    spikeraster!(ax, 1:length(x), x; markersize = 5) # Switch to clustering, and add colormap
+    spikeraster!(ax, 1:length(x), x; markersize = 5) # Switch to clustering
     f
 end
 begin # * Voltage traces
@@ -79,18 +67,6 @@ begin # Some dynamical statistics (firing rate, fano factor, etc...)
         y = s(spikes[Population = At(pop)]) |> ustripall |> collect
         ziggurat!(ax, y, label = string(s); color = Cycled(i))
     end
-    # S = map(stats) do s
-    #     s(spikes[Population = At(pop)]) |> ustripall |> collect
-    # end
-    # Ss = hcat(S...)
-    # kde = Makie.KernelDensity.kde(Ss) |> Makie.KernelDensity.InterpKDE
-    # xs = 0.1:0.01:30
-    # ys = 0.1:0.01:2
-    # X = Iterators.product(xs, ys)
-    # Z = map(X) do x
-    #     pdf(kde, x...)
-    # end
-    # heatmap(xs, ys, Z)
     f
 end
 begin # * Power spectrum of voltage fluctuations

@@ -17,121 +17,107 @@ bp.connect.FixedProb.to_dict = fixedprob_to_dict
 
 
 class AdaptiveHeterogeneous(bp.Network):
-    def __init__(self, N, epsilon=0.1, D=1.5, nu_hat=2, g=5, J=0.1):
+    def __init__(self, N, epsilon=0.1, nu=100, g=4, J=0.1):
         super().__init__()
 
-        # * Note that nu_thr = theta / (epsilon * Ne * J * tau)
+        # * ! Note that nu_thr = theta / (epsilon * Ne * J * tau)
 
-        self.epsilon = epsilon
-        self.D = D
-        self.nu_hat = nu_hat  # Normalized input rate
-        self.g = g
-        self.J = J
+        # ! Reconcile these
+        self.epsilon = epsilon  # ? Probability of connection
+        self.nu = nu  # ? Input rate
+        self.g = g  # ? E:I ratio
+        self.J = J  # ? Synaptic strength
+
+        # * Fixed parameters
+        self.D = 2.0  # Transmission delay, ms
+        self.C = 0.25  # Membrane capacitance, nF
+        self.g_L = 0.0167  # Leak conductance, mS
+        self.V_L = -70.0  # Leaky current resting potential, mV
+        self.V_K = -85.0  # Potassium current resting potential, mV
+        self.V_th = -50.0  # Spike threshold, mV
+        self.V_rt = -60.0  # Reset potential, mV
+        self.tau_ref = 4.0  # Refractory period, ms
+        self.tau_K = 80.0  # Adaptation time constant, ms
+        self.Delta_g_K = 0.0  # 10.0  # Conductance increase per spike, nS
+        self.V_initializer = bp.init.Uniform(-70.0, -50.0)
 
         num_inh = N // 5
         num_exc = N - num_inh
 
-        theta = 20  # mV
-        tau = 20  # ms
-        tau_ref = 2.0  # ms
-        self.nu_thr = (
-            1000 * theta / (epsilon * num_exc * J * tau)
-        )  # Tau is in milliseconds. *1000 to convert to Hz
-        self.nu = self.nu_hat * self.nu_thr
+        # theta = 20  # mV
+        # tau = 20  # ms
+        # tau_ref = 2.0  # ms
+        # self.nu_thr = (
+        #     1000 * theta / (epsilon * num_exc * J * tau)
+        # )  # Tau is in milliseconds. *1000 to convert to Hz
+        # self.nu = self.nu_hat * self.nu_thr
 
         # geometry
         exc_positions = ClusteredPositions((-1.5, 0), 1)
         inh_positions = ClusteredPositions((1.5, 0), 1)
 
         # neurons
-        self.E = LIFNeuron(
+        self.E = FNSNeuron(
             size=num_exc,
+            C=self.C,  # Membrane capacitance, nF
+            g_L=self.g_L,  # Leak conductance, nS
+            V_L=self.V_L,  # Leaky current resting potential, mV
+            V_K=self.V_K,  # Potassium current resting potential, mV
+            V_th=self.V_th,  # Spike threshold, mV
+            V_rt=self.V_rt,  # Reset potential, mV
+            tau_ref=self.tau_ref,  # Refractory period, ms
+            tau_K=self.tau_K,  # Adaptation time constant, ms
+            Delta_g_K=self.Delta_g_K,  # Conductance increase per spike, nS
+            V_initializer=self.V_initializer,
             embedding=exc_positions,
-            V_rest=0.0,  # For simple IF neuron in paper
-            V_th=theta,
-            V_reset=10.0,
-            R=1,
-            tau=tau,
-            tau_ref=tau_ref,
-            V_initializer=bp.init.Normal(0, 1.0),
         )
 
         # Create a population of inhibitory neurons
-        self.I = LIFNeuron(
+        self.I = FNSNeuron(
             size=num_inh,
+            C=self.C,  # Membrane capacitance, nF
+            g_L=self.g_L,  # Leak conductance, nS
+            V_L=self.V_L,  # Leaky current resting potential, mV
+            V_K=self.V_K,  # Potassium current resting potential, mV
+            V_th=self.V_th,  # Spike threshold, mV
+            V_rt=self.V_rt,  # Reset potential, mV
+            tau_ref=self.tau_ref,  # Refractory period, ms
+            tau_K=self.tau_K,  # Adaptation time constant, ms
+            Delta_g_K=self.Delta_g_K,  # Conductance increase per spike, nS
+            V_initializer=self.V_initializer,
             embedding=inh_positions,
-            V_rest=0.0,
-            V_th=theta,
-            V_reset=10.0,
-            R=1,
-            tau=tau,
-            tau_ref=tau_ref,
-            V_initializer=bp.init.Normal(0, 1.0),
         )
 
-        # Synapses
-        delay_step = D // bp.share["dt"]
-        delay_step = int(delay_step)
-
-        JE = self.J
-        JI = -g * self.J
+        Je = self.J
+        Ji = -g * self.J
 
         self.E2E = DeltaSynapse(
-            self.E,
-            self.E,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JE,
+            pre=self.E,
+            post=self.E,
+            delay=self.D,
+            g_max=Je,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
-        # self.E2E = Synapse(
-        #     pre=self.E,
-        #     post=self.E,
-        #     delay=D,
-        #     J=JE,
-        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-        # )
-        # self.E2I = Synapse(
-        #     self.E,
-        #     self.I,
-        #     delay=D,
-        #     J=JE,
-        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-        # )
-        # self.I2E = Synapse(
-        #     self.I,
-        #     self.E,
-        #     delay=D,
-        #     J=JI,
-        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-        # )
-        # self.I2I = Synapse(
-        #     self.I,
-        #     self.I,
-        #     delay=D,
-        #     J=JI,
-        #     conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-        # )
-
         self.E2I = DeltaSynapse(
             self.E,
             self.I,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JE,
+            delay=self.D,
+            g_max=Je,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
         self.I2E = DeltaSynapse(
             self.I,
             self.E,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JI,
+            delay=self.D,
+            g_max=Ji,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
         self.I2I = DeltaSynapse(
             self.I,
             self.I,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JI,
+            delay=self.D,
+            g_max=Ji,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
 
         # External population
@@ -148,41 +134,19 @@ class AdaptiveHeterogeneous(bp.Network):
         self.ext2E = DeltaSynapse(
             self.ext,
             self.E,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JE,
+            delay=self.D,
+            g_max=Je,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
         self.ext2I = DeltaSynapse(
             self.ext,
             self.I,
-            bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
-            g_max=JE,
+            delay=self.D,
+            g_max=Je,
+            conn=bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
         )
 
-        # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)
         self.Iin = bp.dyn.InputVar(self.I.varshape)
         self.E.add_inp_fun("", self.Ein)
         self.I.add_inp_fun("", self.Iin)
-
-    def to_dict(self):
-        return {
-            self.__class__.__name__: {
-                "epsilon": self.epsilon,
-                "D": self.D,
-                "nu": maybe_initializer(self.nu),
-                "g": self.g,
-                "J": self.J,
-                "populations": {
-                    "E": self.E.to_dict(),
-                    "I": self.I.to_dict(),
-                },
-                "synapses": {
-                    "E2E": self.E2E.to_dict(),
-                    "E2I": self.E2I.to_dict(),
-                    "I2E": self.I2E.to_dict(),
-                    "I2I": self.I2I.to_dict(),
-                },
-            }
-        }

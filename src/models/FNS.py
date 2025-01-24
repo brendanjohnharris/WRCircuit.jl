@@ -31,6 +31,7 @@ from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..neurons import FNSNeuron
 from ..positions import *
+from ..synapses import *
 
 
 def remove_key(d, key):
@@ -233,17 +234,17 @@ class GaussianKernel(AbstractKernel):
     ----------
     sigma : float, keyword-only
         Width of the Gaussian.
-    max_prob : float, optional
+    p_max : float, optional
         Maximum probability of connection.
     """
 
     def __init__(
         self,
         sigma,
-        max_prob=1.0,
+        p_max=1.0,
     ):
         self.sigma = sigma
-        self.max_prob = max_prob
+        self.p_max = p_max
 
         # super(GaussianKernel, self).__init__(
         #     domain=domain,
@@ -254,26 +255,47 @@ class GaussianKernel(AbstractKernel):
         # )
 
     def __call__(self, distance):
-        return self.max_prob * jnp.exp(-(distance**2) / (2 * self.sigma**2))
+        return self.p_max * jnp.exp(-(distance**2) / (2 * self.sigma**2))
 
     def to_dict(self):
-        return {"sigma": self.sigma, "max_prob": self.max_prob}
+        return {"sigma": self.sigma, "p_max": self.p_max}
 
 
-class FNSCircuit(bp.Network):
-    def __init__(self, num_exc, num_inh, method="exp_auto"):
+class FNScircuit(bp.Network):
+    def __init__(
+        self,
+        rho=30000,  # Density of Exc. neurons (neurons per mm^2)
+        dx=1,  # Width of the spatial domain (mm)
+        sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
+        sigma_ei=0.1,
+        sigma_ie=0.1,
+        sigma_ii=0.125,
+        p_ee=0.1,  # Maximum connection probability (Campagnola2022, corrected)
+        p_ei=0.2,
+        p_ie=0.3,
+        p_ii=0.3,
+        boundary="periodic",
+        include_self=False,
+        gamma=4,  # Ratio of Exc. to Inh. neurons
+        g=4,  # Per-neuron synaptic weight E:I ratio
+        method="exp_auto",
+    ):
         super().__init__()
 
         # geometry
-        domain = num_exc  # Bounds of the grid, assuming left bottom corner is at (0, 0)
-        exc_positions = GridPositions(domain)
-        inh_positions = RandomPositions(domain)
+        A = dx**2
+        ne = round(np.sqrt(rho * A))  # Number of grid points in each dimension
+        ni = round((ne**2) / gamma)
+
+        # dx bounds the grid, assuming left bottom corner is at (0, 0)
+        exc_positions = GridPositions((dx, dx))
+        inh_positions = RandomPositions((dx, dx))
 
         # neurons
         self.E = FNSNeuron(
-            size=num_exc,
+            size=(ne, ne),
             C=0.25,
-            g_L=16.7,
+            g_L=16.7,  # Nonosiemens?
             V_L=-70.0,
             V_th=-50.0,
             V_rt=-60.0,
@@ -285,7 +307,7 @@ class FNSCircuit(bp.Network):
 
         # Create a population of inhibitory neurons
         self.I = FNSNeuron(
-            size=num_inh,
+            size=ni,
             C=0.25,
             g_L=16.7,
             V_L=-70.0,
@@ -298,32 +320,44 @@ class FNSCircuit(bp.Network):
         )
 
         # Connectivity topology
-        conn_E2E = DistanceDependent(
-            GaussianKernel(
-                sigma=3.0,
-            ),
-            self.E.embedding.domain,
-            self.E.positions,
-            boundary="periodic",
-            include_self=False,
+        conn_ee = DistanceDependent(  # This part seems slow... can we fix? or jax?
+            kernel=GaussianKernel(sigma=sigma_ee, p_max=p_ee),
+            domain=self.E.embedding.domain,
+            positions_pre=self.E.positions,
+            positions_post=self.E.positions,
+            boundary=boundary,
+            include_self=include_self,
         )
-        conn_E2I = bp.connect.FixedProb(prob=0.1)
-        conn_I2E = bp.connect.FixedProb(prob=0.1)
-        conn_I2I = DistanceDependent(
-            GaussianKernel(
-                sigma=3.0,
-            ),
-            self.I.embedding.domain,
-            self.I.positions,
-            boundary="periodic",
-            include_self=False,
+        conn_ei = DistanceDependent(
+            kernel=GaussianKernel(sigma=sigma_ei, p_max=p_ei),
+            domain=self.E.embedding.domain,
+            positions_pre=self.E.positions,
+            positions_post=self.I.positions,
+            boundary=boundary,
+            include_self=include_self,
+        )
+        conn_ie = DistanceDependent(
+            kernel=GaussianKernel(sigma=sigma_ie, p_max=p_ie),
+            domain=self.I.embedding.domain,
+            positions_pre=self.I.positions,
+            positions_post=self.E.positions,
+            boundary=boundary,
+            include_self=include_self,
+        )
+        conn_ii = DistanceDependent(
+            kernel=GaussianKernel(sigma=sigma_ii, p_max=p_ii),
+            domain=self.I.embedding.domain,
+            positions_pre=self.I.positions,
+            positions_post=self.I.positions,
+            boundary=boundary,
+            include_self=include_self,
         )
 
         # Synapses
-        self.E2E = Synapse(self.E, self.E, delay=2.0, conn=conn_E2E)
-        self.E2I = Synapse(self.E, self.I, delay=2.0, conn=conn_E2I)
-        self.I2E = Synapse(self.I, self.E, delay=2.0, conn=conn_I2E)
-        self.I2I = Synapse(self.I, self.I, delay=2.0, conn=conn_I2I)
+        self.E2E = Synapse(self.E, self.E, delay=2.0, conn=conn_ee)
+        self.E2I = Synapse(self.E, self.I, delay=2.0, conn=conn_ei)
+        self.I2E = Synapse(self.I, self.E, delay=2.0, conn=conn_ie)
+        self.I2I = Synapse(self.I, self.I, delay=2.0, conn=conn_ii)
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)

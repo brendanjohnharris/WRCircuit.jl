@@ -37,7 +37,7 @@ class GridPositions(AbstractPositions):
     def __call__(self, shape):
         shape = self.cast_to_tuple(shape)
         if len(shape) != len(self.domain):
-            raise ValueError("Shape and size must have the same length")
+            raise ValueError("Shape and domain must have the same length")
         grids = []
         for s, n in zip(self.domain, shape):
             offset = (s / n) / 2  # Offset to center the grid
@@ -55,7 +55,7 @@ class RandomPositions(AbstractPositions):
 
     def __call__(self, shape):
         shape = self.cast_to_tuple(shape)
-        total_positions = jnp.prod(shape)
+        total_positions = np.prod(shape)
         positions = []
         for s in self.domain:
             positions.append(np.random.uniform(0, s, total_positions))

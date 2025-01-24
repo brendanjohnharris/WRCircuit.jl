@@ -1,3 +1,4 @@
 from .balanced import *
 from .heterogeneous import *
-from .spatial_model import *
+from .FNS import *
+from .adaptiveheterogeneous import *

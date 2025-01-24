@@ -89,28 +89,28 @@ class Balanced(bp.Network):
             bp.connect.FixedProb(
                 prob=epsilon, allow_multi_conn=True
             ),  # allow_multi_conn=True speeds up construction SO MUCH!!! Because it allows for jax
-            delay_step=delay_step,
+            delay=D,
             g_max=JE,
         )
         self.E2I = DeltaSynapse(
             self.E,
             self.I,
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
+            delay=D,
             g_max=JE,
         )
         self.I2E = DeltaSynapse(
             self.I,
             self.E,
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
+            delay=D,
             g_max=JI,
         )
         self.I2I = DeltaSynapse(
             self.I,
             self.I,
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
+            delay=D,
             g_max=JI,
         )
 
@@ -129,14 +129,14 @@ class Balanced(bp.Network):
             self.ext,
             self.E,
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
+            delay=D,
             g_max=JE,
         )
         self.ext2I = DeltaSynapse(
             self.ext,
             self.I,
             bp.connect.FixedProb(prob=epsilon, allow_multi_conn=True),
-            delay_step=delay_step,
+            delay=D,
             g_max=JE,
         )
 

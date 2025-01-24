@@ -50,10 +50,19 @@ def maybe_initializer(x, exclude=["rng"]):
 
 class Synapse(bp.Projection):
     def __init__(
-        self, pre, post, delay, conn, J=1.0, tau_d=5, tau_r=1, V_rev=0.0, alpha=1.0
+        self,
+        pre: NeuDyn,
+        post: NeuDyn,
+        conn: Union[TwoEndConnector, ArrayType, Dict[str, ArrayType]],
+        delay: Union[float, ArrayType, Initializer, Callable] = 0.0,
+        g_max: Union[float, ArrayType, Initializer, Callable] = 1.0,
+        tau_d: Union[float, ArrayType, Initializer, Callable] = 5.0,
+        tau_r: Union[float, ArrayType, Initializer, Callable] = 1.0,
+        V_rev: Union[float, ArrayType, Initializer, Callable] = 0.0,
+        alpha: Union[float, ArrayType, Initializer, Callable] = 1.0,
     ):
         self.delay = delay
-        self.J = J
+        self.g_max = g_max
         self.tau_d = tau_d
         self.tau_r = tau_r
         self.V_rev = V_rev
@@ -66,17 +75,19 @@ class Synapse(bp.Projection):
             syn=bp.dyn.AMPA.desc(
                 pre.num, alpha=alpha, beta=1 / tau_d, T=1 / tau_r, T_dur=tau_r
             ),
-            comm=bp.dnn.CSRLinear(conn(pre_size=pre.size, post_size=post.size), J),
+            comm=bp.dnn.EventCSRLinear(
+                conn(pre_size=pre.size, post_size=post.size), g_max
+            ),
             out=bp.dyn.COBA(E=V_rev),
             post=post,
         )
 
     def to_dict(self):
         return {
-            "pre": self.pre.name,
-            "post": self.post.name,
+            "pre": self.proj.pre.name,
+            "post": self.proj.post.name,
             "delay": maybe_initializer(self.delay),
-            "J": maybe_initializer(self.J),
+            "g_max": maybe_initializer(self.g_max),
             "tau_d": maybe_initializer(self.tau_d),
             "tau_r": maybe_initializer(self.tau_r),
             "V_rev": maybe_initializer(self.V_rev),
@@ -84,156 +95,180 @@ class Synapse(bp.Projection):
         }
 
 
-class DeltaSynapse(TwoEndConn):
+class DeltaSynapse(bp.Projection):
     def __init__(
         self,
         pre: NeuDyn,
         post: NeuDyn,
         conn: Union[TwoEndConnector, ArrayType, Dict[str, ArrayType]],
-        output: SynOut = CUBA(target_var="input"),
-        stp: Optional[SynSTP] = None,
-        comp_method: str = "sparse",
+        delay: Union[float, ArrayType, Initializer, Callable] = 0.0,
         g_max: Union[float, ArrayType, Initializer, Callable] = 1.0,
-        delay_step: Union[float, ArrayType, Initializer, Callable] = None,
-        post_ref_key: str = None,
-        name: str = None,
-        mode: bm.Mode = None,
-        stop_spike_gradient: bool = False,
     ):
-        super().__init__(
-            name=name, pre=pre, post=post, conn=conn, output=output, stp=stp, mode=mode
-        )
-        # parameters
-        self.stop_spike_gradient = stop_spike_gradient
-        self.post_ref_key = post_ref_key
-        if post_ref_key:
-            self.check_post_attrs(post_ref_key)
-        self.comp_method = comp_method
+        self.delay = delay
+        self.g_max = g_max
 
-        # connections and weights
-        self.g_max, self.conn_mask = self._init_weights(
-            g_max, comp_method=comp_method, sparse_data="csr"
+        super().__init__()
+        self.proj = bp.dyn.FullProjDelta(
+            pre=pre,
+            post=post,
+            delay=self.delay,
+            comm=bp.dnn.EventCSRLinear(
+                conn(pre_size=pre.size, post_size=post.size), g_max
+            ),
         )
 
-        # register delay
-        self.delay_step = delay_step
-        self.pre.register_local_delay("spike", self.name, delay_step=self.delay_step)
 
-    def update(self, pre_spike=None):
-        # pre-synaptic spikes
-        if pre_spike is None:
-            pre_spike = self.pre.get_local_delay("spike", self.name)
-        pre_spike = bm.as_jax(pre_spike)
-        if self.stop_spike_gradient:
-            pre_spike = jax.lax.stop_gradient(pre_spike)
+# !!! This was much faster... why?
+# class DeltaSynapse(TwoEndConn):
+#     def __init__(
+#         self,
+#         pre: NeuDyn,
+#         post: NeuDyn,
+#         conn: Union[TwoEndConnector, ArrayType, Dict[str, ArrayType]],
+#         output: SynOut = CUBA(target_var="input"),
+#         stp: Optional[SynSTP] = None,
+#         comp_method: str = "sparse",
+#         g_max: Union[float, ArrayType, Initializer, Callable] = 1.0,
+#         delay_step: Union[float, ArrayType, Initializer, Callable] = None,
+#         post_ref_key: str = None,
+#         name: str = None,
+#         mode: bm.Mode = None,
+#         stop_spike_gradient: bool = False,
+#     ):
+#         super().__init__(
+#             name=name, pre=pre, post=post, conn=conn, output=output, stp=stp, mode=mode
+#         )
+#         # parameters
+#         self.stop_spike_gradient = stop_spike_gradient
+#         self.post_ref_key = post_ref_key
+#         if post_ref_key:
+#             self.check_post_attrs(post_ref_key)
+#         self.comp_method = comp_method
 
-        # update sub-components
-        if self.stp is not None:
-            self.stp.update(pre_spike)
+#         # connections and weights
+#         self.g_max, self.conn_mask = self._init_weights(
+#             g_max, comp_method=comp_method, sparse_data="csr"
+#         )
 
-        # synaptic values onto the post
-        if isinstance(self.conn, All2All):
-            syn_value = bm.asarray(pre_spike, dtype=bm.float_)
-            if self.stp is not None:
-                syn_value = self.stp(syn_value)
-            post_vs = self._syn2post_with_all2all(syn_value, self.g_max)
-        elif isinstance(self.conn, One2One):
-            syn_value = bm.asarray(pre_spike, dtype=bm.float_)
-            if self.stp is not None:
-                syn_value = self.stp(syn_value)
-            post_vs = self._syn2post_with_one2one(syn_value, self.g_max)
-        else:
-            if self.comp_method == "sparse":
-                if self.stp is not None:
-                    syn_value = self.stp(pre_spike)
-                    f = lambda s: bm.sparse.csrmv(
-                        self.g_max,
-                        self.conn_mask[0],
-                        self.conn_mask[1],
-                        s,
-                        shape=(self.pre.num, self.post.num),
-                        transpose=True,
-                    )
-                else:
-                    syn_value = pre_spike
-                    f = lambda s: bm.event.csrmv(
-                        self.g_max,
-                        self.conn_mask[0],
-                        self.conn_mask[1],
-                        s,
-                        shape=(self.pre.num, self.post.num),
-                        transpose=True,
-                    )
-                if isinstance(self.mode, bm.BatchingMode):
-                    f = jax.vmap(f)
-                post_vs = f(syn_value)
-            else:
-                syn_value = bm.asarray(pre_spike, dtype=bm.float_)
-                if self.stp is not None:
-                    syn_value = self.stp(syn_value)
-                post_vs = self._syn2post_with_dense(
-                    syn_value, self.g_max, self.conn_mask
-                )
-        if self.post_ref_key:
-            post_vs = post_vs * (1.0 - getattr(self.post, self.post_ref_key))
+#         # register delay
+#         self.delay_step = delay_step
+#         self.pre.register_local_delay("spike", self.name, delay_step=self.delay_step)
 
-        # update outputs
-        return self.output(post_vs)
+#     def update(self, pre_spike=None):
+#         # pre-synaptic spikes
+#         if pre_spike is None:
+#             pre_spike = self.pre.get_local_delay("spike", self.name)
+#         pre_spike = bm.as_jax(pre_spike)
+#         if self.stop_spike_gradient:
+#             pre_spike = jax.lax.stop_gradient(pre_spike)
 
-    def _init_weights(
-        self,
-        weight: Union[float, ArrayType, Callable],
-        comp_method: str,
-        sparse_data: str = "csr",
-    ) -> Tuple[Union[float, ArrayType], ArrayType]:
-        if comp_method not in ["sparse", "dense"]:
-            raise ValueError(
-                f'"comp_method" must be in "sparse" and "dense", but we got {comp_method}'
-            )
-        if sparse_data not in ["csr", "ij", "coo"]:
-            raise ValueError(
-                f'"sparse_data" must be in "csr" and "ij", but we got {sparse_data}'
-            )
-        if self.conn is None:
-            raise ValueError(
-                f'Must provide "conn" when initialize the model {self.name}'
-            )
+#         # update sub-components
+#         if self.stp is not None:
+#             self.stp.update(pre_spike)
 
-        # connections and weights
-        if isinstance(self.conn, One2One):
-            weight = parameter(weight, (self.pre.num,), allow_none=False)
-            conn_mask = None
+#         # synaptic values onto the post
+#         if isinstance(self.conn, All2All):
+#             syn_value = bm.asarray(pre_spike, dtype=bm.float_)
+#             if self.stp is not None:
+#                 syn_value = self.stp(syn_value)
+#             post_vs = self._syn2post_with_all2all(syn_value, self.g_max)
+#         elif isinstance(self.conn, One2One):
+#             syn_value = bm.asarray(pre_spike, dtype=bm.float_)
+#             if self.stp is not None:
+#                 syn_value = self.stp(syn_value)
+#             post_vs = self._syn2post_with_one2one(syn_value, self.g_max)
+#         else:
+#             if self.comp_method == "sparse":
+#                 if self.stp is not None:
+#                     syn_value = self.stp(pre_spike)
+#                     f = lambda s: bm.sparse.csrmv(
+#                         self.g_max,
+#                         self.conn_mask[0],
+#                         self.conn_mask[1],
+#                         s,
+#                         shape=(self.pre.num, self.post.num),
+#                         transpose=True,
+#                     )
+#                 else:
+#                     syn_value = pre_spike
+#                     f = lambda s: bm.event.csrmv(
+#                         self.g_max,
+#                         self.conn_mask[0],
+#                         self.conn_mask[1],
+#                         s,
+#                         shape=(self.pre.num, self.post.num),
+#                         transpose=True,
+#                     )
+#                 if isinstance(self.mode, bm.BatchingMode):
+#                     f = jax.vmap(f)
+#                 post_vs = f(syn_value)
+#             else:
+#                 syn_value = bm.asarray(pre_spike, dtype=bm.float_)
+#                 if self.stp is not None:
+#                     syn_value = self.stp(syn_value)
+#                 post_vs = self._syn2post_with_dense(
+#                     syn_value, self.g_max, self.conn_mask
+#                 )
+#         if self.post_ref_key:
+#             post_vs = post_vs * (1.0 - getattr(self.post, self.post_ref_key))
 
-        elif isinstance(self.conn, All2All):
-            weight = parameter(weight, (self.pre.num, self.post.num), allow_none=False)
-            conn_mask = None
+#         # update outputs
+#         return self.output(post_vs)
 
-        else:
-            if comp_method == "sparse":
-                if sparse_data == "csr":
-                    conn_mask = self.conn.require("pre2post")
-                elif sparse_data in ["ij", "coo"]:
-                    conn_mask = self.conn.require("post_ids", "pre_ids")
-                else:
-                    ValueError(f"Unknown sparse data type: {sparse_data}")
-                weight = parameter(weight, conn_mask[0].shape, allow_none=False)
-            elif comp_method == "dense":
-                weight = parameter(
-                    weight, (self.pre.num, self.post.num), allow_none=False
-                )
-                conn_mask = self.conn.require("conn_mat")
-            else:
-                raise ValueError(f"Unknown connection type: {comp_method}")
+#     def _init_weights(
+#         self,
+#         weight: Union[float, ArrayType, Callable],
+#         comp_method: str,
+#         sparse_data: str = "csr",
+#     ) -> Tuple[Union[float, ArrayType], ArrayType]:
+#         if comp_method not in ["sparse", "dense"]:
+#             raise ValueError(
+#                 f'"comp_method" must be in "sparse" and "dense", but we got {comp_method}'
+#             )
+#         if sparse_data not in ["csr", "ij", "coo"]:
+#             raise ValueError(
+#                 f'"sparse_data" must be in "csr" and "ij", but we got {sparse_data}'
+#             )
+#         if self.conn is None:
+#             raise ValueError(
+#                 f'Must provide "conn" when initialize the model {self.name}'
+#             )
 
-        # training weights # !!! EDIT IF WE WANT TO TRAIN
-        # if isinstance(self.mode, bm.TrainingMode):
-        #     weight = bm.TrainVar(weight)
-        return weight, conn_mask
+#         # connections and weights
+#         if isinstance(self.conn, One2One):
+#             weight = parameter(weight, (self.pre.num,), allow_none=False)
+#             conn_mask = None
 
-    def to_dict(self):
-        return {
-            "pre": self.pre.name,
-            "post": self.post.name,
-            "delay_step": self.delay_step,
-            "g_max": maybe_initializer(self.g_max),
-        }
+#         elif isinstance(self.conn, All2All):
+#             weight = parameter(weight, (self.pre.num, self.post.num), allow_none=False)
+#             conn_mask = None
+
+#         else:
+#             if comp_method == "sparse":
+#                 if sparse_data == "csr":
+#                     conn_mask = self.conn.require("pre2post")
+#                 elif sparse_data in ["ij", "coo"]:
+#                     conn_mask = self.conn.require("post_ids", "pre_ids")
+#                 else:
+#                     ValueError(f"Unknown sparse data type: {sparse_data}")
+#                 weight = parameter(weight, conn_mask[0].shape, allow_none=False)
+#             elif comp_method == "dense":
+#                 weight = parameter(
+#                     weight, (self.pre.num, self.post.num), allow_none=False
+#                 )
+#                 conn_mask = self.conn.require("conn_mat")
+#             else:
+#                 raise ValueError(f"Unknown connection type: {comp_method}")
+
+#         # training weights # !!! EDIT IF WE WANT TO TRAIN
+#         # if isinstance(self.mode, bm.TrainingMode):
+#         #     weight = bm.TrainVar(weight)
+#         return weight, conn_mask
+
+#     def to_dict(self):
+#         return {
+#             "pre": self.pre.name,
+#             "post": self.post.name,
+#             "delay_step": self.delay_step,
+#             "g_max": maybe_initializer(self.g_max),
+#         }
