@@ -233,12 +233,14 @@ class FNSNeuron(GradNeuDyn):
     def update(self, I_ext=None):
         t = share.load("t")
         dt = share.load("dt")
-        if I_ext is None:
+        if not I_ext:
             I_ext = 0.0
 
         # integrate variables
         V, g_K = self.integral(self.V.value, self.g_K.value, t, I_ext, dt)
-        I_rec = self.sum_delta_inputs()
+        I_rec = (
+            self.sum_delta_inputs() + self.sum_current_inputs()
+        )  # ! Is this valid!!!
         V += I_rec
 
         # refractory period
@@ -278,10 +280,11 @@ class FNSNeuron(GradNeuDyn):
         # update variables
         self.V.value = V
         self.g_K.value = g_K
+        print(self.input.value)
+        print(I_rec)
         self.input.value = I_rec
         self.spike.value = spike
         self.t_last_spike.value = t_last_spike
-
         return spike
 
     def clear_input(self):

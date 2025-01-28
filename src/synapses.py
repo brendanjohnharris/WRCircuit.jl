@@ -75,7 +75,7 @@ class Synapse(bp.Projection):
             syn=bp.dyn.AMPA.desc(
                 pre.num, alpha=alpha, beta=1 / tau_d, T=1 / tau_r, T_dur=tau_r
             ),
-            comm=bp.dnn.EventCSRLinear(
+            comm=bp.dnn.EventCSRLinear(  # ! The dtype warning comes from here. Why??
                 conn(pre_size=pre.size, post_size=post.size), g_max
             ),
             out=bp.dyn.COBA(E=V_rev),

@@ -14,7 +14,7 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 
 begin # * Simulate
-    m = model(; gamma = 4, g = 4)#; epsilon = 0.1, J = 0.1) # Try 4.0, nu_hat = 1.0 for gaussian
+    m = model(; rho = 300)
     m.to_dict()
 end
 begin

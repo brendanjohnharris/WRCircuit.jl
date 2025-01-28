@@ -211,7 +211,6 @@ class DistanceDependent(TwoEndConnector):
             min_neurons = min(self.num_pre_neurons, self.num_post_neurons)
             diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
             conn_mat = conn_mat.at[diag_indices].set(False)
-
         return conn_mat
 
     def to_dict(self, keys=["boundary", "include_self"]):
@@ -281,6 +280,21 @@ class FNScircuit(bp.Network):
         method="exp_auto",
     ):
         super().__init__()
+        self.rho = rho
+        self.dx = dx
+        self.sigma_ee = sigma_ee
+        self.sigma_ei = sigma_ei
+        self.sigma_ie = sigma_ie
+        self.sigma_ii = sigma_ii
+        self.p_ee = p_ee
+        self.p_ei = p_ei
+        self.p_ie = p_ie
+        self.p_ii = p_ii
+        self.boundary = boundary
+        self.include_self = include_self
+        self.gamma = gamma
+        self.g = g
+        self.method = method
 
         # geometry
         A = dx**2
@@ -295,11 +309,12 @@ class FNScircuit(bp.Network):
         self.E = FNSNeuron(
             size=(ne, ne),
             C=0.25,
-            g_L=16.7,  # Nonosiemens?
+            g_L=0.0167,
             V_L=-70.0,
             V_th=-50.0,
             V_rt=-60.0,
             tau_ref=4.0,
+            tau_K=80.0,
             V_initializer=bp.init.Uniform(-70.0, -50.0),
             method=method,
             embedding=exc_positions,
@@ -309,11 +324,12 @@ class FNScircuit(bp.Network):
         self.I = FNSNeuron(
             size=ni,
             C=0.25,
-            g_L=16.7,
+            g_L=0.0167,
             V_L=-70.0,
             V_th=-50.0,
             V_rt=-60.0,
             tau_ref=4.0,
+            tau_K=80.0,
             V_initializer=bp.init.Uniform(-70.0, -50.0),
             method=method,
             embedding=inh_positions,
@@ -354,10 +370,10 @@ class FNScircuit(bp.Network):
         )
 
         # Synapses
-        self.E2E = Synapse(self.E, self.E, delay=2.0, conn=conn_ee)
-        self.E2I = Synapse(self.E, self.I, delay=2.0, conn=conn_ei)
-        self.I2E = Synapse(self.I, self.E, delay=2.0, conn=conn_ie)
-        self.I2I = Synapse(self.I, self.I, delay=2.0, conn=conn_ii)
+        self.E2E = Synapse(self.E, self.E, delay=2.0, conn=conn_ee, tau_d=5.0)
+        self.E2I = Synapse(self.E, self.I, delay=2.0, conn=conn_ei, tau_d=3.0)
+        self.I2E = Synapse(self.I, self.E, delay=2.0, conn=conn_ie, tau_d=5.0)
+        self.I2I = Synapse(self.I, self.I, delay=2.0, conn=conn_ii, tau_d=3.0)
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)
@@ -365,18 +381,41 @@ class FNScircuit(bp.Network):
         self.E.add_inp_fun("", self.Ein)
         self.I.add_inp_fun("", self.Iin)
 
-    def to_dict(self):
-        return {
-            self.__class__.__name__: {
-                "populations": {
-                    "E": self.E.to_dict(),
-                    "I": self.I.to_dict(),
-                },
-                "synapses": {
-                    "E2E": self.E2E.to_dict(),
-                    "E2I": self.E2I.to_dict(),
-                    "I2E": self.I2E.to_dict(),
-                    "I2I": self.I2I.to_dict(),
-                },
+    def to_dict(
+        self,
+        keys=[
+            "rho",
+            "dx",
+            "sigma_ee",
+            "sigma_ei",
+            "sigma_ie",
+            "sigma_ii",
+            "p_ee",
+            "p_ei",
+            "p_ie",
+            "p_ii",
+            "boundary",
+            "include_self",
+            "gamma",
+            "g",
+            "method",
+        ],
+    ):
+        out = {
+            "parameters": {
+                key: maybe_initializer(value)
+                for key, value in self.__dict__.items()
+                if key in keys
             }
         }
+        out["populations"] = {
+            "E": self.E.to_dict(),
+            "I": self.I.to_dict(),
+        }
+        out["synapses"] = {
+            "E2E": self.E2E.to_dict(),
+            "E2I": self.E2I.to_dict(),
+            "I2E": self.I2E.to_dict(),
+            "I2I": self.I2I.to_dict(),
+        }
+        return {self.__class__.__name__: out}
