@@ -128,7 +128,7 @@ function timebins(x::RegularTimeSeries, τ::Number)
     tbins = [i .. i + τ for i in tbins]
     x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
 end
-function TimeseriesTools.coarsegrain(x::RegularTimeSeries, τ::Real)
+function TimeseriesTools.coarsegrain(x::RegularTimeSeries, τ::Number)
     negdims = setdiff(1:ndims(x), dimnum(x, 𝑡))
     x = timebins(x, τ)
     x = eachslice.(x; dims = negdims |> Tuple) |> stack

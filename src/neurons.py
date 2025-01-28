@@ -233,15 +233,15 @@ class FNSNeuron(GradNeuDyn):
     def update(self, I_ext=None):
         t = share.load("t")
         dt = share.load("dt")
-        if not I_ext:
+        if I_ext == None:
             I_ext = 0.0
 
-        # integrate variables
-        V, g_K = self.integral(self.V.value, self.g_K.value, t, I_ext, dt)
-        I_rec = (
-            self.sum_delta_inputs() + self.sum_current_inputs()
-        )  # ! Is this valid!!!
-        V += I_rec
+        I = self.sum_current_inputs(
+            self.V, init=I_ext
+        )  # The recurrent inputs and external inputs combined
+        I_rec = I - I_ext  # Extract the recurrent inputs
+        V, g_K = self.integral(self.V.value, self.g_K.value, t, I, dt)
+        V += self.sum_delta_inputs()  # And the delta inputs
 
         # refractory period
         refractory = (t - self.t_last_spike) <= self.tau_ref
@@ -280,8 +280,6 @@ class FNSNeuron(GradNeuDyn):
         # update variables
         self.V.value = V
         self.g_K.value = g_K
-        print(self.input.value)
-        print(I_rec)
         self.input.value = I_rec
         self.spike.value = spike
         self.t_last_spike.value = t_last_spike

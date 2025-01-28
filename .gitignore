@@ -5,6 +5,7 @@
 *.jl.mem
 *.jld2
 *.mat
+*.mp4
 *.parquet
 .CondaPkg/
 .vscode

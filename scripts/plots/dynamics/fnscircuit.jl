@@ -14,7 +14,7 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 
 begin # * Simulate
-    m = model(; rho = 300)
+    m = model(; rho = 30000, nu = 0.0001, p_ext = 0.001)
     m.to_dict()
 end
 begin
@@ -26,7 +26,34 @@ begin
     input = X[Var = At(:input)]
     spikes = X[Var = At(:spike)]
     pop = :E # Excitatory
-    lines(V[1][1:1000, 1])
+    lines(input[1][1:1000, 1])
+end
+begin # * Animate spikes
+    T = 500u"ms" .. 1000u"ms"
+    dt = 0.1u"ms"
+    N = m.E.size |> convert2(Vector)
+    domain = m.E.embedding.domain |> convert2(Vector)
+    dx = domain ./ N
+    xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
+
+    f = Figure()
+    ax = Axis(f[1, 1])
+    x = spikes[1][𝑡 = T] # Excitatory spikes
+    x = sum.(coarsegrain(x, dt)) # Bin over time
+    x = set(x, 𝑡 => mean.(times(x))) # To unitless seconds
+    h = Observable(x[1, :])
+    H = lift(h) do h
+        reshape(h, N...)
+    end
+    _t = Observable(first(times(x)))
+    colorrange = extrema(x)
+    heatmap!(ax, xs..., H; colorrange, colormap = :binary)
+    rm("network.mp4"; force = true)
+    record(f, "network.mp4", times(x)[1:10:end]) do t
+        h[] = x[𝑡 = At(t)]
+        _t[] = t
+    end
+    f
 end
 begin # Spike raster
     f = Figure(size = (1920, 480))
@@ -36,7 +63,7 @@ begin # Spike raster
 
     # First do spike raster with firing rate
     ax = Axis(gs[1][1, 1])
-    x = spiketimes(spikes[Population = At(pop)][𝑡 = T][:, 1:1000])
+    x = spiketimes(spikes[Population = At(pop)][𝑡 = T][:, 1:100])
     spikeraster!(ax, 1:length(x), x; markersize = 5) # Switch to clustering
     f
 end
@@ -48,40 +75,40 @@ begin # * Voltage traces
     end
     f
 end
-begin # * Synaptic input distribution
-    τ = 1 # ms
-    syn = coarsegrain(input[Population = At(pop)], τ) .|> sum
-    syn = Iterators.flatten(syn) |> collect
-    ax = Axis(gs[2]; yscale = log10, limits = (nothing, (1e-8, 1)))
-    ziggurat!(syn; bins = 50, normalization = :pdf, color = Cycled(1))
+# begin # * Synaptic input distribution
+#     τ = 1 # ms
+#     syn = coarsegrain(input[Population = At(pop)], τ) .|> sum
+#     syn = Iterators.flatten(syn) |> collect
+#     ax = Axis(gs[2]; yscale = log10, limits = (nothing, (1e-8, 1)))
+#     ziggurat!(syn; bins = 50, normalization = :pdf, color = Cycled(1))
 
-    D = fit(Normal, syn)
-    xs = range(extrema(syn)...; length = 500)
-    lines!(ax, xs, pdf.(D, xs); color = Cycled(2), linestyle = :dash)
+#     D = fit(Normal, syn)
+#     xs = range(extrema(syn)...; length = 500)
+#     lines!(ax, xs, pdf.(D, xs); color = Cycled(2), linestyle = :dash)
 
-    D = fit(Stable, syn)
-    D = Stable(D.α, 0, D.σ, D.μ)
-    lines!(ax, xs, pdf.(D, xs); color = Cycled(4), linestyle = :dash)
-    f
-end
-begin # Some dynamical statistics (firing rate, fano factor, etc...)
-    stats = [firingrate, cv] #, fanofactor]
-    for (i, s) in enumerate(stats)
-        ax = Axis(gs[3][i, 1]; title = string(s))
-        y = s(spikes[Population = At(pop)]) |> ustripall |> collect
-        ziggurat!(ax, y, label = string(s); color = Cycled(i))
-    end
-    f
-end
-begin # * Power spectrum of voltage fluctuations
-    x = V[Population = At(pop)][:, 1:100:end]
-    x = set(x, 𝑡 => ustripall(times(x)) ./ 1000) # To unitless seconds
-    x = set(x, Neuron => 1:size(x, 2))
-    x = x .- mean(x, dims = 1)
-    y = progressmap(x -> spectrum(x, 3), eachslice(x; dims = 2)) |> stack
-    # y = mean(y, dims = 2)
-    # y = dropdims(y, dims = 2)
-    ax = Axis(gs[4])
-    spectrumplot!(ax, y[2:end, :])
-    f |> display
-end
+#     D = fit(Stable, syn)
+#     D = Stable(D.α, 0, D.σ, D.μ)
+#     lines!(ax, xs, pdf.(D, xs); color = Cycled(4), linestyle = :dash)
+#     f
+# end
+# begin # Some dynamical statistics (firing rate, fano factor, etc...)
+#     stats = [firingrate, cv] #, fanofactor]
+#     for (i, s) in enumerate(stats)
+#         ax = Axis(gs[3][i, 1]; title = string(s))
+#         y = s(spikes[Population = At(pop)]) |> ustripall |> collect
+#         ziggurat!(ax, y, label = string(s); color = Cycled(i))
+#     end
+#     f
+# end
+# begin # * Power spectrum of voltage fluctuations
+#     x = V[Population = At(pop)][:, 1:100:end]
+#     x = set(x, 𝑡 => ustripall(times(x)) ./ 1000) # To unitless seconds
+#     x = set(x, Neuron => 1:size(x, 2))
+#     x = x .- mean(x, dims = 1)
+#     y = progressmap(x -> spectrum(x, 3), eachslice(x; dims = 2)) |> stack
+#     # y = mean(y, dims = 2)
+#     # y = dropdims(y, dims = 2)
+#     ax = Axis(gs[4])
+#     spectrumplot!(ax, y[2:end, :])
+#     f |> display
+# end
