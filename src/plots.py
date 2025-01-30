@@ -38,7 +38,7 @@ def animate_spiking_activity(
         The animation object.
     """
     # Extract the time stamps and spiking data from the runner
-    ts = runner.mon.ts  # Time stamps, shape (num_time_steps,)
+    ts = runner.mon["ts"]  # Time stamps, shape (num_time_steps,)
     E_spikes = runner.mon["E.spike"]  # Shape (num_time_steps, num_exc_neurons)
     I_spikes = runner.mon["I.spike"]  # Shape (num_time_steps, num_inh_neurons)
 
@@ -91,9 +91,10 @@ def animate_spiking_activity(
         )
 
     # Define the spatial grid
-    domain = FNSnet.domain
-    xedges = np.linspace(0, domain[0], domain[0] + 1)
-    yedges = np.linspace(0, domain[1], domain[1] + 1)
+    domain = FNSnet.E.embedding.domain
+    size = FNSnet.E.size
+    xedges = np.linspace(0, domain[0], size[0] + 1)
+    yedges = np.linspace(0, domain[1], size[1] + 1)
 
     # Precompute all histograms
     histograms = []
@@ -106,7 +107,7 @@ def animate_spiking_activity(
             bins=[xedges, yedges],
             weights=E_activity_frames[frame_idx, :],
         )
-        # If you wish to include I population, uncomment the lines below
+        # I population
         # hist2d_I, _, _ = np.histogram2d(
         #     I_positions[:, 0],
         #     I_positions[:, 1],
@@ -115,7 +116,7 @@ def animate_spiking_activity(
         # )
         # hist2d = hist2d_E + hist2d_I
 
-        hist2d = hist2d_E  # Only E population as per your code
+        hist2d = hist2d_E  # Only E population
 
         histograms.append(hist2d)
 

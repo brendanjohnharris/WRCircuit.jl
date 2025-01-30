@@ -16,10 +16,14 @@ function bprun(net::Py, time; monitors = ("E.spike", "I.spike", "E.V", "I.V"), j
 end
 
 function bpsolve(net::Py, time; populations = [:E, :I], vars = [:V], transient = 500u"ms",
+                 inputs = nothing,
                  kwargs...)
     ps = collect(Iterators.product(populations, vars))[:]
     monitors = ["$p.$v" for (p, v) in ps] |> Tuple
-    runner = bprun(net, time; monitors, kwargs...)
+    if !isnothing(inputs)
+        inputs = models.format_input(inputs)
+    end
+    runner = bprun(net, time; monitors, inputs, kwargs...)
     t = runner.mon["ts"].view() |> convert2(Vector)
     dt = brainpy.share["dt"] |> convert2(Float64)
     lastt = last(t) |> convert2(Float64)

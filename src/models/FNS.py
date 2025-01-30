@@ -27,11 +27,17 @@ from brainpy import share
 from brainpy.types import Shape, ArrayType
 from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
+from brainpy._src.connect.base import get_idx_type
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..neurons import FNSNeuron
 from ..positions import *
 from ..synapses import *
+
+
+def format_input(inputs):
+    # Convert all elements to Tuples of (string, jnparrays)
+    return [(str(key), jnp.asarray(value)) for key, value in inputs]
 
 
 def remove_key(d, key):
@@ -56,7 +62,9 @@ def euclidean_distance(pos1, pos2):
 
 class DistanceDependent(TwoEndConnector):
     """
-    Synaptic connector that connects neurons based on their distances.
+    Synaptic connector that connects neurons based on their distances. Also, it caches the
+    built matrix, so that multiple calls to requires('xxx') do not rebuild the connectivity
+    matrix (for a given method 'xxx' like 'csr')
 
     Parameters
     ----------
@@ -123,95 +131,183 @@ class DistanceDependent(TwoEndConnector):
             self.seed = np.random.randint(0, 2**32)
         self.key = jax.random.PRNGKey(self.seed)
 
-    def build_mat(self):
-        # Capture constants to pass into JIT-compiled functions
-        boundary_code = self.boundary_code
-        domain = self.domain
-        distance_metric = self.distance_metric
+    # def build_mat(self):
+    #     # Capture constants to pass into JIT-compiled functions
+    #     boundary_code = self.boundary_code
+    #     domain = self.domain
+    #     distance_metric = self.distance_metric
 
+    #     @partial(jit, static_argnums=(2, 3))
+    #     def compute_distance_with_boundary(
+    #         pos_pre, pos_post, boundary_code, distance_metric
+    #     ):
+    #         # Adjust positions according to boundary conditions
+
+    #         delta = pos_pre - pos_post
+
+    #         # Periodic boundary adjustment
+    #         delta_periodic = jnp.mod(delta + domain / 2, domain) - domain / 2
+    #         adjusted_pos_pre_periodic = pos_post + delta_periodic
+    #         adjusted_pos_post_periodic = pos_post
+    #         dist_periodic = distance_metric(
+    #             adjusted_pos_pre_periodic, adjusted_pos_post_periodic
+    #         )
+
+    #         # Reflecting boundary adjustment
+    #         adjusted_pos_pre_reflecting = jnp.clip(pos_pre, 0, domain)
+    #         adjusted_pos_post_reflecting = jnp.clip(pos_post, 0, domain)
+    #         dist_reflecting = distance_metric(
+    #             adjusted_pos_pre_reflecting, adjusted_pos_post_reflecting
+    #         )
+
+    #         # Absorbing boundary adjustment
+    #         outside_pre = (pos_pre < 0) | (pos_pre > domain)
+    #         outside_post = (pos_post < 0) | (pos_post > domain)
+    #         outside = jnp.any(outside_pre) | jnp.any(outside_post)
+    #         dist_absorbing = distance_metric(pos_pre, pos_post)
+    #         dist_absorbing = jnp.where(outside, jnp.inf, dist_absorbing)
+
+    #         # None boundary adjustment
+    #         dist_none = distance_metric(pos_pre, pos_post)
+
+    #         # Stack distances
+    #         distances = jnp.stack(
+    #             [dist_periodic, dist_reflecting, dist_absorbing, dist_none]
+    #         )
+
+    #         # Select the appropriate distance based on boundary_code
+    #         dist = distances[boundary_code]
+    #         return dist
+
+    #     @partial(jit, static_argnums=(2, 3))
+    #     def compute_probability(pos_pre, pos_post, kernel, distance_metric):
+    #         dist = compute_distance_with_boundary(
+    #             pos_pre, pos_post, boundary_code, distance_metric
+    #         )
+    #         prob = kernel(dist)
+    #         return prob
+
+    #     # Fix kernel and distance_metric using partial to ensure they are static
+    #     compute_probability_fixed = partial(
+    #         compute_probability, kernel=self.kernel, distance_metric=distance_metric
+    #     )
+
+    #     # Vectorize the computation
+    #     compute_probability_vmap = vmap(
+    #         vmap(
+    #             compute_probability_fixed,
+    #             in_axes=(None, 0),
+    #         ),
+    #         in_axes=(0, None),
+    #     )
+
+    #     probabilities = compute_probability_vmap(
+    #         self.positions_pre,
+    #         self.positions_post,
+    #     )
+
+    #     probabilities = jnp.clip(probabilities, 0.0, 1.0)
+
+    #     # Generate random numbers
+    #     self.key, subkey = jax.random.split(self.key)
+    #     random_matrix = jax.random.uniform(subkey, shape=probabilities.shape)
+
+    #     conn_mat = probabilities > random_matrix
+
+    #     # Remove self-connections if include_self is False
+    #     if not self.include_self:
+    #         min_neurons = min(self.num_pre_neurons, self.num_post_neurons)
+    #         diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
+    #         conn_mat = conn_mat.at[diag_indices].set(False)
+    #     return conn_mat
+
+    def build_csr(self):
+        # Precompute distances
         @partial(jit, static_argnums=(2, 3))
         def compute_distance_with_boundary(
             pos_pre, pos_post, boundary_code, distance_metric
         ):
-            # Adjust positions according to boundary conditions
-
             delta = pos_pre - pos_post
 
             # Periodic boundary adjustment
-            delta_periodic = jnp.mod(delta + domain / 2, domain) - domain / 2
-            adjusted_pos_pre_periodic = pos_post + delta_periodic
-            adjusted_pos_post_periodic = pos_post
-            dist_periodic = distance_metric(
-                adjusted_pos_pre_periodic, adjusted_pos_post_periodic
+            delta_periodic = (
+                jnp.mod(delta + self.domain / 2, self.domain) - self.domain / 2
             )
+            adjusted_pos_pre_periodic = pos_post + delta_periodic
+            dist_periodic = distance_metric(adjusted_pos_pre_periodic, pos_post)
 
             # Reflecting boundary adjustment
-            adjusted_pos_pre_reflecting = jnp.clip(pos_pre, 0, domain)
-            adjusted_pos_post_reflecting = jnp.clip(pos_post, 0, domain)
+            adjusted_pos_pre_reflecting = jnp.clip(pos_pre, 0, self.domain)
+            adjusted_pos_post_reflecting = jnp.clip(pos_post, 0, self.domain)
             dist_reflecting = distance_metric(
                 adjusted_pos_pre_reflecting, adjusted_pos_post_reflecting
             )
 
             # Absorbing boundary adjustment
-            outside_pre = (pos_pre < 0) | (pos_pre > domain)
-            outside_post = (pos_post < 0) | (pos_post > domain)
+            outside_pre = (pos_pre < 0) | (pos_pre > self.domain)
+            outside_post = (pos_post < 0) | (pos_post > self.domain)
             outside = jnp.any(outside_pre) | jnp.any(outside_post)
-            dist_absorbing = distance_metric(pos_pre, pos_post)
-            dist_absorbing = jnp.where(outside, jnp.inf, dist_absorbing)
+            dist_absorbing = jnp.where(
+                outside, jnp.inf, distance_metric(pos_pre, pos_post)
+            )
 
             # None boundary adjustment
             dist_none = distance_metric(pos_pre, pos_post)
 
-            # Stack distances
+            # Select the appropriate distance based on boundary_code
             distances = jnp.stack(
                 [dist_periodic, dist_reflecting, dist_absorbing, dist_none]
             )
+            return distances[boundary_code]
 
-            # Select the appropriate distance based on boundary_code
-            dist = distances[boundary_code]
-            return dist
-
-        @partial(jit, static_argnums=(2, 3))
-        def compute_probability(pos_pre, pos_post, kernel, distance_metric):
-            dist = compute_distance_with_boundary(
-                pos_pre, pos_post, boundary_code, distance_metric
-            )
-            prob = kernel(dist)
-            return prob
-
-        # Fix kernel and distance_metric using partial to ensure they are static
-        compute_probability_fixed = partial(
-            compute_probability, kernel=self.kernel, distance_metric=distance_metric
+        # Vectorize distance computation
+        compute_distance_vmap = vmap(
+            vmap(compute_distance_with_boundary, in_axes=(None, 0, None, None)),
+            in_axes=(0, None, None, None),
         )
 
-        # Vectorize the computation
-        compute_probability_vmap = vmap(
-            vmap(
-                compute_probability_fixed,
-                in_axes=(None, 0),
-            ),
-            in_axes=(0, None),
-        )
-
-        probabilities = compute_probability_vmap(
+        # Precompute the distance matrix
+        distance_matrix = compute_distance_vmap(
             self.positions_pre,
             self.positions_post,
+            self.boundary_code,
+            self.distance_metric,
         )
 
-        probabilities = jnp.clip(probabilities, 0.0, 1.0)
+        # Compute probabilities using the kernel
+        probabilities = self.kernel(distance_matrix)
 
-        # Generate random numbers
+        # Generate random numbers only for non-zero probabilities
         self.key, subkey = jax.random.split(self.key)
-        random_matrix = jax.random.uniform(subkey, shape=probabilities.shape)
+        random_values = jax.random.uniform(subkey, shape=probabilities.shape)
+        connections = probabilities > random_values
 
-        conn_mat = probabilities > random_matrix
-
-        # Remove self-connections if include_self is False
+        # Remove self-connections if needed
         if not self.include_self:
             min_neurons = min(self.num_pre_neurons, self.num_post_neurons)
             diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
-            conn_mat = conn_mat.at[diag_indices].set(False)
-        return conn_mat
+            connections = connections.at[diag_indices].set(False)
+
+        # Convert to sparse CSR format
+        pre_ids, post_ids = jnp.where(connections)
+
+        # Ensure indices are within bounds
+        assert jnp.all(pre_ids < self.num_pre_neurons), "pre_ids out of bounds"
+        assert jnp.all(post_ids < self.num_post_neurons), "post_ids out of bounds"
+
+        # Compute the number of non-zero elements per row
+        pre_nums = jnp.bincount(pre_ids, length=self.num_pre_neurons)
+
+        # Compute the indptr array
+        indptrs = jnp.concatenate([jnp.array([0]), jnp.cumsum(pre_nums)])
+
+        # # Debug: Print intermediate results
+        # print("post_ids (column indices):", post_ids)
+        # print("pre_ids (row indices):", pre_ids)
+        # print("pre_nums (non-zero counts per row):", pre_nums)
+        # print("indptrs (CSR indptr array):", indptrs)
+
+        return post_ids.astype(get_idx_type()), indptrs.astype(get_idx_type())
 
     def to_dict(self, keys=["boundary", "include_self"]):
         out = {key: value for key, value in self.__dict__.items() if key in keys}
@@ -279,7 +375,7 @@ class FNScircuit(bp.Network):
         g=4,  # Per-neuron synaptic weight E:I ratio
         nu=1,  # External population firing rate
         p_ext=0.1,
-        J_e=0.01,
+        J_e=0.2,  # ! Currently abritrary
         method="exp_auto",
     ):
         super().__init__()
@@ -300,7 +396,9 @@ class FNScircuit(bp.Network):
         self.nu = nu
         self.p_ext = p_ext
         self.J_e = J_e
-        self.J_i = -g * self.J_e
+        self.J_i = (
+            g * self.J_e
+        )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
 
         # geometry
@@ -343,7 +441,7 @@ class FNScircuit(bp.Network):
         )
 
         # Connectivity topology
-        conn_ee = DistanceDependent(  # This part seems slow... can we fix? or jax?
+        conn_ee = DistanceDependent(
             kernel=GaussianKernel(sigma=sigma_ee, p_max=p_ee),
             domain=self.E.embedding.domain,
             positions_pre=self.E.positions,
@@ -377,46 +475,80 @@ class FNScircuit(bp.Network):
         )
 
         # Synapses
+        tau_d_e = 4.0  # ! Maybe these are different? E2I gets tau_d_e?
+        tau_d_i = 1.0
+        V_rev_e = 0.0
+        V_rev_i = -80  # ? Makes the inhibitory synapses inhibitory
         self.E2E = Synapse(
-            pre=self.E, post=self.E, delay=2.0, conn=conn_ee, tau_d=5.0, g_max=self.J_e
+            pre=self.E,
+            post=self.E,
+            delay=2.0,
+            conn=conn_ee,
+            tau_d=tau_d_e,
+            tau_r=1.0,
+            g_max=self.J_e,
+            V_rev=V_rev_e,
         )
         self.E2I = Synapse(
-            pre=self.E, post=self.I, delay=2.0, conn=conn_ei, tau_d=3.0, g_max=self.J_e
+            pre=self.E,
+            post=self.I,
+            delay=2.0,
+            conn=conn_ei,
+            tau_d=tau_d_e,  # ! Is this tau_d_e or tau_d_i?
+            tau_r=1.0,
+            g_max=self.J_e,
+            V_rev=V_rev_e,
         )
         self.I2E = Synapse(
-            pre=self.I, post=self.E, delay=2.0, conn=conn_ie, tau_d=5.0, g_max=self.J_i
+            pre=self.I,
+            post=self.E,
+            delay=2.0,
+            conn=conn_ie,
+            tau_d=tau_d_i,
+            tau_r=1.0,
+            g_max=self.J_i,
+            V_rev=V_rev_i,
         )
         self.I2I = Synapse(
-            pre=self.I, post=self.I, delay=2.0, conn=conn_ii, tau_d=3.0, g_max=self.J_i
+            pre=self.I,
+            post=self.I,
+            delay=2.0,
+            conn=conn_ii,
+            tau_d=tau_d_i,
+            tau_r=1.0,
+            g_max=self.J_i,
+            V_rev=V_rev_i,
         )
 
         # External population
-        self.ext = bp.dyn.PoissonGroup(
-            size=self.E.num,  # So that the average number of connections to each population matches Ce
-            freqs=self.nu,
-            keep_size=False,
-            sharding=None,
-            spk_type=None,
-            name=None,
-            mode=None,
-            seed=None,
-        )
-        self.ext2E = Synapse(
-            pre=self.ext,
-            post=self.E,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
-            delay=2.0,
-            tau_d=5.0,
-            g_max=self.J_e,
-        )
-        self.ext2I = Synapse(
-            pre=self.ext,
-            post=self.I,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
-            delay=2.0,
-            tau_d=3.0,
-            g_max=self.J_e,
-        )
+        # self.ext = bp.dyn.PoissonGroup(
+        #     size=int(
+        #         np.round(self.E.num * p_ext)
+        #     ),  # So that the average number of connections to each population matches Ce
+        #     freqs=self.nu,
+        #     keep_size=False,
+        #     sharding=None,
+        #     spk_type=None,
+        #     name=None,
+        #     mode=None,
+        #     seed=None,
+        # )
+        # self.ext2E = Synapse(
+        #     pre=self.ext,
+        #     post=self.E,
+        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+        #     delay=2.0,
+        #     tau_d=5.0,
+        #     g_max=self.J_e,
+        # )
+        # self.ext2I = Synapse(
+        #     pre=self.ext,
+        #     post=self.I,
+        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+        #     delay=2.0,
+        #     tau_d=3.0,
+        #     g_max=self.J_e,
+        # )
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)

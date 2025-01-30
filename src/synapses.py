@@ -48,18 +48,58 @@ def maybe_initializer(x, exclude=["rng"]):
         return x
 
 
+# class ReversePooling(bp.initialize._InterLayerInitializer):
+#     """Initialize weights with the reverse pooling method, Gu et al. 2018"""
+
+#     def __init__(self, seed=None):
+#         super().__init__()
+#         self.rng = bm.random.default_rng(seed, clone=False)
+#         ......other parameters..............
+
+#     def construct(self, indices, indptr):
+#         """
+#         Construct the weights using the reverse pooling method, given the CSR indices of the
+#         adjacency matrix
+#         """
+
+#     def __call__(self, shape, dtype=None):
+#         shape = bp.initialize._format_shape(shape)
+#         assert self.weights.shape() == shape, "Shape mismatch between cached weights and desired shape."
+#         return bm.asarray(self.weights, dtype=dtype)
+
+
+# class JointCSRLinear(bp.dnn.CSRLinear):
+#     """
+#     Same as CSRLinear, but with the option to have conneciton weights that are a function of
+#     the adjacency matrix.
+#     """
+
+#     def __init__(
+#         self,
+#         conn: bp.connect.TwoEndConnector,
+#         weight: Union[float, ArrayType, Callable],
+#         **kwargs
+#     ):
+#         super().__init__(
+#             conn=conn, weight=1.0, **kwargs
+#         )  # Weights are set to 1.0 intially, then updated later
+#         self.indices, self.indptr
+
+
 class Synapse(bp.Projection):
     def __init__(
         self,
         pre: NeuDyn,
         post: NeuDyn,
-        conn: Union[TwoEndConnector, ArrayType, Dict[str, ArrayType]],
+        conn: Union[TwoEndConnector],
         delay: Union[float, ArrayType, Initializer, Callable] = 0.0,
         g_max: Union[float, ArrayType, Initializer, Callable] = 1.0,
         tau_d: Union[float, ArrayType, Initializer, Callable] = 5.0,
         tau_r: Union[float, ArrayType, Initializer, Callable] = 1.0,
         V_rev: Union[float, ArrayType, Initializer, Callable] = 0.0,
         alpha: Union[float, ArrayType, Initializer, Callable] = 1.0,
+        name: Optional[str] = None,
+        mode: Optional[bm.Mode] = None,
     ):
         self.delay = delay
         self.g_max = g_max
@@ -68,15 +108,19 @@ class Synapse(bp.Projection):
         self.V_rev = V_rev
         self.alpha = alpha
 
-        super().__init__()
+        super().__init__(name=name, mode=mode)
+
         self.proj = bp.dyn.FullProjAlignPreSDMg(
             pre=pre,
             delay=self.delay,
+            # T_dur and T describe a rectangular pulse with unitary area, of duration T=tau_r
+            # and height T = 1/tau_r. Alpha is the binding constant, generally set to 1
             syn=bp.dyn.AMPA.desc(
-                pre.num, alpha=alpha, beta=1 / tau_d, T=1 / tau_r, T_dur=tau_r
+                pre.num, alpha=1 / tau_r, beta=1 / tau_d, T=tau_r, T_dur=tau_r
             ),
-            comm=bp.dnn.EventCSRLinear(  # ! The dtype warning comes from here. Why??
-                conn(pre_size=pre.size, post_size=post.size), g_max
+            comm=bp.dnn.CSRLinear(  # ! The dtype warning comes from here. Why??
+                conn=conn(pre.size, post.size),
+                weight=g_max,  ### IMPORTANT DON"T USE EVENTCSRLINEAR MESSES WITH THE SYNAPSES. See https://github.com/brainpy/BrainPy/issues/654#issuecomment-2008556824
             ),
             out=bp.dyn.COBA(E=V_rev),
             post=post,

@@ -14,12 +14,19 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 
 begin # * Simulate
-    m = model(; rho = 30000, nu = 0.0001, p_ext = 0.001)
+    m = model(; rho = 30000)
     m.to_dict()
 end
 begin
     T = 1000.0
-    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input, :g_K])
+    cue = Dewdrop.numpy.array(m.E.V) |> convert2(Vector)
+    Cue = reshape(cue, convert2(Vector)(m.E.size)...)
+    Cue[:] .= 0.0
+    Cue[1:4, 1:4] .= 0.5 # Cue the bottom corner
+    # cue = cue)
+    # cue = repeat(cue, 1, Int(T÷convert2(Float32)(Dewdrop.brainpy.share["dt"])))
+    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input, :g_K],
+                inputs = [("Ein.input", cue)])
 
     V = X[Var = At(:V)]
     g_K = X[Var = At(:g_K)]
@@ -29,8 +36,8 @@ begin
     lines(input[1][1:1000, 1])
 end
 begin # * Animate spikes
-    T = 500u"ms" .. 1000u"ms"
-    dt = 0.1u"ms"
+    T = 0u"ms" .. 1000u"ms"
+    dt = 5u"ms"
     N = m.E.size |> convert2(Vector)
     domain = m.E.embedding.domain |> convert2(Vector)
     dx = domain ./ N
@@ -40,8 +47,8 @@ begin # * Animate spikes
     ax = Axis(f[1, 1])
     x = spikes[1][𝑡 = T] # Excitatory spikes
     x = sum.(coarsegrain(x, dt)) # Bin over time
-    x = set(x, 𝑡 => mean.(times(x))) # To unitless seconds
-    h = Observable(x[1, :])
+    x = set(x, 𝑡 => mean.(times(x))) |> ustripall # To unitless seconds
+    h = Observable(parent(x[1, :]))
     H = lift(h) do h
         reshape(h, N...)
     end
@@ -49,10 +56,11 @@ begin # * Animate spikes
     colorrange = extrema(x)
     heatmap!(ax, xs..., H; colorrange, colormap = :binary)
     rm("network.mp4"; force = true)
-    record(f, "network.mp4", times(x)[1:10:end]) do t
-        h[] = x[𝑡 = At(t)]
-        _t[] = t
+    record(f, "network.mp4", eachindex(times(x))) do i
+        h[] = parent(x[i, :])
+        _t[] = times(x)[i]
     end
+    @info "Animation saved to `./network.mp4`"
     f
 end
 begin # Spike raster

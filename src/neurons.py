@@ -34,6 +34,10 @@ from .positions import *
 from .synapses import maybe_initializer, Synapse
 
 
+def nanerror():
+    raise ValueError("Array contains NaN values")
+
+
 def maybe_default_embedding(self, embedding):
     if embedding is None:
         embedding = GridPositions(self.size)
@@ -153,7 +157,7 @@ class FNSNeuron(GradNeuDyn):
         method: str = "exp_auto",
         init_var: bool = True,
         scaling: Optional[bm.Scaling] = None,
-        # neuron parameters
+        # neuron parameters. Membrane potentials are mV
         C: Union[float, ArrayType, Callable] = 0.25,  # nF
         g_L: Union[float, ArrayType, Callable] = 0.0167,  # mS
         V_L: Union[float, ArrayType, Callable] = -70.0,  # mV
@@ -240,8 +244,17 @@ class FNSNeuron(GradNeuDyn):
             self.V, init=I_ext
         )  # The recurrent inputs and external inputs combined
         I_rec = I - I_ext  # Extract the recurrent inputs
+
         V, g_K = self.integral(self.V.value, self.g_K.value, t, I, dt)
         V += self.sum_delta_inputs()  # And the delta inputs
+
+        # jax.debug.print(str(jnp.any(jnp.isnan(V)).value))
+        # jax.lax.cond(
+        #     jnp.any(jnp.isnan(V)),  # Condition
+        #     lambda _: nanerror(),  # If True, raise an error
+        #     lambda _: None,  # If False, do nothing
+        #     operand=None,
+        # )
 
         # refractory period
         refractory = (t - self.t_last_spike) <= self.tau_ref
