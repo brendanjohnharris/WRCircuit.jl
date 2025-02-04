@@ -371,11 +371,11 @@ class FNScircuit(bp.Network):
         p_ii=0.3,
         boundary="periodic",
         include_self=False,
-        gamma=4,  # Ratio of Exc. to Inh. neurons
-        g=4,  # Per-neuron synaptic weight E:I ratio
+        gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
+        zeta=4,  # Per-neuron synaptic weight E:I ratio
         nu=1,  # External population firing rate
-        p_ext=0.1,
-        J_e=0.2,  # ! Currently abritrary
+        n_ext=10,  # Number of external synapses per Exc. neuron
+        J_e=0.0004,  # ! Currently abitrary. Has same units as g_L? uS
         method="exp_auto",
     ):
         super().__init__()
@@ -392,12 +392,12 @@ class FNScircuit(bp.Network):
         self.boundary = boundary
         self.include_self = include_self
         self.gamma = gamma
-        self.g = g
+        self.zeta = zeta
         self.nu = nu
-        self.p_ext = p_ext
+        self.n_ext = n_ext
         self.J_e = J_e
         self.J_i = (
-            g * self.J_e
+            self.J_e * zeta
         )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
 
@@ -420,6 +420,7 @@ class FNScircuit(bp.Network):
             V_rt=-60.0,
             tau_ref=4.0,
             tau_K=80.0,
+            Delta_g_K=0.002,
             V_initializer=bp.init.Uniform(-70.0, -50.0),
             method=method,
             embedding=exc_positions,
@@ -435,6 +436,7 @@ class FNScircuit(bp.Network):
             V_rt=-60.0,
             tau_ref=4.0,
             tau_K=80.0,
+            Delta_g_K=0.0,  # No adaptation for inhibitory neurons
             V_initializer=bp.init.Uniform(-70.0, -50.0),
             method=method,
             embedding=inh_positions,
@@ -486,7 +488,7 @@ class FNScircuit(bp.Network):
             conn=conn_ee,
             tau_d=tau_d_e,
             tau_r=1.0,
-            g_max=self.J_e,
+            g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
             V_rev=V_rev_e,
         )
         self.E2I = Synapse(
@@ -496,7 +498,7 @@ class FNScircuit(bp.Network):
             conn=conn_ei,
             tau_d=tau_d_e,  # ! Is this tau_d_e or tau_d_i?
             tau_r=1.0,
-            g_max=self.J_e,
+            g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
             V_rev=V_rev_e,
         )
         self.I2E = Synapse(
@@ -506,7 +508,7 @@ class FNScircuit(bp.Network):
             conn=conn_ie,
             tau_d=tau_d_i,
             tau_r=1.0,
-            g_max=self.J_i,
+            g_max=bp.init.Normal(self.J_i, self.J_i * 0.05),
             V_rev=V_rev_i,
         )
         self.I2I = Synapse(
@@ -516,39 +518,39 @@ class FNScircuit(bp.Network):
             conn=conn_ii,
             tau_d=tau_d_i,
             tau_r=1.0,
-            g_max=self.J_i,
+            g_max=bp.init.Normal(self.J_i, self.J_i * 0.05),
             V_rev=V_rev_i,
         )
 
         # External population
-        # self.ext = bp.dyn.PoissonGroup(
-        #     size=int(
-        #         np.round(self.E.num * p_ext)
-        #     ),  # So that the average number of connections to each population matches Ce
-        #     freqs=self.nu,
-        #     keep_size=False,
-        #     sharding=None,
-        #     spk_type=None,
-        #     name=None,
-        #     mode=None,
-        #     seed=None,
-        # )
-        # self.ext2E = Synapse(
-        #     pre=self.ext,
-        #     post=self.E,
-        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
-        #     delay=2.0,
-        #     tau_d=5.0,
-        #     g_max=self.J_e,
-        # )
-        # self.ext2I = Synapse(
-        #     pre=self.ext,
-        #     post=self.I,
-        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
-        #     delay=2.0,
-        #     tau_d=3.0,
-        #     g_max=self.J_e,
-        # )
+        p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
+        N_ext = int(np.round(self.E.num * p_ext))
+        self.ext = bp.dyn.PoissonGroup(
+            size=N_ext,
+            freqs=self.nu,
+            keep_size=False,
+            sharding=None,
+            spk_type=None,
+            name=None,
+            mode=None,
+            seed=None,
+        )
+        self.ext2E = Synapse(
+            pre=self.ext,
+            post=self.E,
+            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+            delay=2.0,
+            tau_d=tau_d_e,
+            g_max=self.J_e,
+        )
+        self.ext2I = Synapse(
+            pre=self.ext,
+            post=self.I,
+            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+            delay=2.0,
+            tau_d=tau_d_e,
+            g_max=self.J_e,
+        )
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)

@@ -103,15 +103,15 @@ class FNSNeuron(GradNeuDyn):
     ============= =============== ======= ==========================================
     **Parameter** **Default**     **Unit** **Description**
     ------------- --------------- ------- ------------------------------------------
-    C             250             pF      Membrane capacitance.
-    g_L           16.7            nS      Leak conductance.
+    C             0.25            nF      Membrane capacitance.
+    g_L           0.0167          uS      Leak conductance.
     V_L           -70.0           mV      Leak reversal potential.
     V_K           -85.0           mV      Potassium reversal potential.
     V_th          -50.0           mV      Spike threshold.
     V_rt          -60.0           mV      Reset potential.
     tau_ref       4.0             ms      Refractory period duration.
     tau_K         80.0            ms      Adaptation time constant.
-    Delta_g_K     10.0            nS      Conductance increment upon spike.
+    Delta_g_K     0.01            uS      Conductance increment upon spike.
     ============= =============== ======= ==========================================
 
     **Variables**
@@ -166,7 +166,7 @@ class FNSNeuron(GradNeuDyn):
         V_rt: Union[float, ArrayType, Callable] = -60.0,  # mV
         tau_ref: Union[float, ArrayType, Callable] = 4.0,  # ms
         tau_K: Union[float, ArrayType, Callable] = 80.0,  # ms
-        Delta_g_K: Union[float, ArrayType, Callable] = 0.01,  # mS
+        Delta_g_K: Union[float, ArrayType, Callable] = 0.01,  # uS
         embedding: Union[None, AbstractPositions] = None,
         V_initializer: Union[Callable, ArrayType] = ZeroInit(),
         g_K_initializer: Union[Callable, ArrayType] = ZeroInit(),

@@ -14,19 +14,18 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 
 begin # * Simulate
-    m = model(; rho = 30000)
+    m = model(; rho = 30000, nu = 275.0, n_ext = 30, J_e = 0.0005, zeta = 18)
     m.to_dict()
 end
 begin
-    T = 1000.0
+    T = 5500.0
     cue = Dewdrop.numpy.array(m.E.V) |> convert2(Vector)
     Cue = reshape(cue, convert2(Vector)(m.E.size)...)
     Cue[:] .= 0.0
     Cue[1:4, 1:4] .= 0.5 # Cue the bottom corner
     # cue = cue)
     # cue = repeat(cue, 1, Int(T÷convert2(Float32)(Dewdrop.brainpy.share["dt"])))
-    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input, :g_K],
-                inputs = [("Ein.input", cue)])
+    X = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V, :input, :g_K])#, inputs = [("Ein.input", cue)])
 
     V = X[Var = At(:V)]
     g_K = X[Var = At(:g_K)]
@@ -37,7 +36,7 @@ begin
 end
 begin # * Animate spikes
     T = 0u"ms" .. 1000u"ms"
-    dt = 5u"ms"
+    dt = 1u"ms"
     N = m.E.size |> convert2(Vector)
     domain = m.E.embedding.domain |> convert2(Vector)
     dx = domain ./ N
@@ -83,40 +82,43 @@ begin # * Voltage traces
     end
     f
 end
-# begin # * Synaptic input distribution
-#     τ = 1 # ms
-#     syn = coarsegrain(input[Population = At(pop)], τ) .|> sum
-#     syn = Iterators.flatten(syn) |> collect
-#     ax = Axis(gs[2]; yscale = log10, limits = (nothing, (1e-8, 1)))
-#     ziggurat!(syn; bins = 50, normalization = :pdf, color = Cycled(1))
+begin # * Synaptic input distribution
+    τ = 1 # ms
+    syn = coarsegrain(input[Population = At(pop)], τ) .|> sum
+    syn = Iterators.flatten(syn) |> collect
+    ax = Axis(gs[2]; yscale = log10, limits = (nothing, (1e-8, 1)))
+    ziggurat!(syn; bins = 50, normalization = :pdf, color = Cycled(1))
 
-#     D = fit(Normal, syn)
-#     xs = range(extrema(syn)...; length = 500)
-#     lines!(ax, xs, pdf.(D, xs); color = Cycled(2), linestyle = :dash)
+    D = fit(Normal, syn)
+    xs = range(extrema(syn)...; length = 500)
+    lines!(ax, xs, pdf.(D, xs); color = Cycled(2), linestyle = :dash)
 
-#     D = fit(Stable, syn)
-#     D = Stable(D.α, 0, D.σ, D.μ)
-#     lines!(ax, xs, pdf.(D, xs); color = Cycled(4), linestyle = :dash)
-#     f
-# end
-# begin # Some dynamical statistics (firing rate, fano factor, etc...)
-#     stats = [firingrate, cv] #, fanofactor]
-#     for (i, s) in enumerate(stats)
-#         ax = Axis(gs[3][i, 1]; title = string(s))
-#         y = s(spikes[Population = At(pop)]) |> ustripall |> collect
-#         ziggurat!(ax, y, label = string(s); color = Cycled(i))
-#     end
-#     f
-# end
-# begin # * Power spectrum of voltage fluctuations
-#     x = V[Population = At(pop)][:, 1:100:end]
-#     x = set(x, 𝑡 => ustripall(times(x)) ./ 1000) # To unitless seconds
-#     x = set(x, Neuron => 1:size(x, 2))
-#     x = x .- mean(x, dims = 1)
-#     y = progressmap(x -> spectrum(x, 3), eachslice(x; dims = 2)) |> stack
-#     # y = mean(y, dims = 2)
-#     # y = dropdims(y, dims = 2)
-#     ax = Axis(gs[4])
-#     spectrumplot!(ax, y[2:end, :])
-#     f |> display
-# end
+    D = fit(Stable, syn)
+    D = Stable(D.α, 0, D.σ, D.μ)
+    lines!(ax, xs, pdf.(D, xs); color = Cycled(4), linestyle = :dash)
+    f
+end
+begin # Some dynamical statistics (firing rate, fano factor, etc...)
+    stats = [firingrate, cv] #, fanofactor]
+    for (i, s) in enumerate(stats)
+        y = s(spikes[Population = At(pop)]) |> ustripall |> collect
+        nzero = sum(y .<= 0) / length(y)
+        nzero = round(Int, nzero * 100)
+        ax = Axis(gs[3][i, 1]; title = "$s: $nzero% zeros")
+        y = y[y .> 0]
+        ziggurat!(ax, y, label = string(s); color = Cycled(i))
+    end
+    f
+end
+begin # * Power spectrum of voltage fluctuations
+    x = V[Population = At(pop)][:, 1:100:end]
+    x = set(x, 𝑡 => ustripall(times(x)) ./ 1000) # To unitless seconds
+    x = set(x, Neuron => 1:size(x, 2))
+    x = x .- mean(x, dims = 1)
+    y = progressmap(x -> spectrum(x, 1), eachslice(x; dims = 2)) |> stack
+    # y = mean(y, dims = 2)
+    # y = dropdims(y, dims = 2)
+    ax = Axis(gs[4])
+    spectrumplot!(ax, y[2:end, :])
+    f |> display
+end
