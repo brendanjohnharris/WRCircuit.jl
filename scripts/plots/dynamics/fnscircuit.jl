@@ -14,7 +14,7 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 
 begin # * Simulate
-    m = model(; rho = 30000, nu = 275.0, n_ext = 30, J_e = 0.0005, zeta = 18)
+    m = model(; rho = 30000, nu = 100.0, n_ext = 10, J_e = 0.0005, zeta = 2)
     m.to_dict()
 end
 begin

@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 import uuid
+from scipy.integrate import dblquad
 
 import brainpy as bp
 import brainpy.math as bm
@@ -125,11 +126,10 @@ class DistanceDependent(TwoEndConnector):
         self.kernel = kernel
 
         self.include_self = include_self
-        if seed is not None:  # Want to pass in the model uuid for reproducibility
-            self.seed = seed
+        if seed is not None:
+            self.key = seed
         else:
-            self.seed = np.random.randint(0, 2**32)
-        self.key = jax.random.PRNGKey(self.seed)
+            self.key = jax.random.PRNGKey(np.random.randint(0, 2**32))
 
     # def build_mat(self):
     #     # Capture constants to pass into JIT-compiled functions
@@ -356,6 +356,94 @@ class GaussianKernel(AbstractKernel):
         return {"sigma": self.sigma, "p_max": self.p_max}
 
 
+def expected_indegree(FNSnet, pop="ee", approx=True):
+    """
+    Compute the mean indegree.
+    Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large dx/small sigma.
+    """
+    assert FNSnet.boundary == "periodic"
+    dx = FNSnet.dx
+    if pop[0] == "e":
+        rho = FNSnet.rho
+    else:
+        rho = FNSnet.rho / FNSnet.gamma
+    if pop == "ee":
+        p_max = FNSnet.p_ee
+        sigma = FNSnet.sigma_ee
+    elif pop == "ei":
+        p_max = FNSnet.p_ei
+        sigma = FNSnet.sigma_ei
+    elif pop == "ie":
+        p_max = FNSnet.p_ie
+        sigma = FNSnet.sigma_ie
+    elif pop == "ii":
+        p_max = FNSnet.p_ii
+        sigma = FNSnet.sigma_ii
+
+    if approx:
+        return 2 * np.pi * sigma**2 * p_max * rho
+    else:
+
+        def integrand(y, x, dx, sigma, p_max):
+            # y is integrated first, x second (dblquad's calling convention).
+            rx = min(x, dx - x)
+            ry = min(y, dx - y)
+            r2 = rx * rx + ry * ry
+            return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
+
+        result, error_est = dblquad(
+            integrand,
+            0,
+            dx,  # outer integral range for x
+            lambda x: 0,  # lower limit for y
+            lambda x: dx,  # upper limit for y
+            args=(dx, sigma, p_max),
+        )
+        return rho * result
+
+def indegrees(proj):
+    N = jnp.prod(jnp.array(proj.post.size))
+    indices = jnp.array(proj.comm.indices, dtype=int)
+    in_degree = jnp.bincount(indices, length=N)
+    return in_degree
+
+def indegree(proj):
+    N = jnp.prod(jnp.array(proj.post.size))
+    indices = jnp.array(proj.comm.indices, dtype=int)
+    in_degree = jnp.bincount(indices, length=N)
+    return jnp.mean(in_degree)
+
+def correlate_weights(proj, J, key):
+    k = indegrees(proj)
+
+    nonzero_mask = (k > 0)
+    k_nonzero = jnp.where(nonzero_mask, k, 0)
+    sqrtk_nonzero = jnp.sqrt(jnp.where(nonzero_mask, k, 1))  # sqrt(k[i]) if k>0, else sqrt(1)=1 to avoid nans
+
+    sum_k    = jnp.sum(k_nonzero)
+    sum_sqrt = jnp.sum(sqrtk_nonzero)
+    # If *all* k are zero, sum_sqrt=0 => we define J_rec=0
+    J_rec = jnp.where(sum_sqrt > 0, J * sum_k / sum_sqrt, 0.0)
+
+    indices = proj.comm.indices
+    ws_orig = proj.comm.weight
+    k_safe = jnp.where(k > 0, k, jnp.inf)
+
+    # Vector of w_mean for *each* edge e:
+    w_means = J_rec / jnp.sqrt(k_safe[indices])
+
+    # Scales for normal distribution
+    w_scales = 0.05 * w_means
+
+    # 4) Sample random normal for each edge
+    n_edges = indices.shape[0]
+    randvals = jax.random.normal(key, shape=(n_edges,))
+
+    # The new weight for edge e
+    new_ws = w_means + randvals * w_scales
+
+    return new_ws
+
 class FNScircuit(bp.Network):
     def __init__(
         self,
@@ -370,13 +458,14 @@ class FNScircuit(bp.Network):
         p_ie=0.3,
         p_ii=0.3,
         boundary="periodic",
-        include_self=False,
+        include_self=True,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
-        zeta=4,  # Per-neuron synaptic weight E:I ratio
+        zeta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
         J_e=0.0004,  # ! Currently abitrary. Has same units as g_L? uS
         method="exp_auto",
+        key = jax.random.PRNGKey(np.random.randint(0, 2**32))
     ):
         super().__init__()
         self.rho = rho
@@ -400,6 +489,7 @@ class FNScircuit(bp.Network):
             self.J_e * zeta
         )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
+        self.key = key
 
         # geometry
         A = dx**2
@@ -408,9 +498,12 @@ class FNScircuit(bp.Network):
 
         # dx bounds the grid, assuming left bottom corner is at (0, 0)
         exc_positions = GridPositions((dx, dx))
-        inh_positions = RandomPositions((dx, dx))
+
+        self.key, subkey = jax.random.split(self.key)
+        inh_positions = RandomPositions((dx, dx), subkey)
 
         # neurons
+        self.key, subkey = jax.random.split(self.key)
         self.E = FNSNeuron(
             size=(ne, ne),
             C=0.25,
@@ -421,12 +514,13 @@ class FNScircuit(bp.Network):
             tau_ref=4.0,
             tau_K=80.0,
             Delta_g_K=0.002,
-            V_initializer=bp.init.Uniform(-70.0, -50.0),
+            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
         )
 
         # Create a population of inhibitory neurons
+        self.key, subkey = jax.random.split(self.key)
         self.I = FNSNeuron(
             size=ni,
             C=0.25,
@@ -437,12 +531,13 @@ class FNScircuit(bp.Network):
             tau_ref=4.0,
             tau_K=80.0,
             Delta_g_K=0.0,  # No adaptation for inhibitory neurons
-            V_initializer=bp.init.Uniform(-70.0, -50.0),
+            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
             embedding=inh_positions,
         )
 
         # Connectivity topology
+        self.key, subkey = jax.random.split(self.key)
         conn_ee = DistanceDependent(
             kernel=GaussianKernel(sigma=sigma_ee, p_max=p_ee),
             domain=self.E.embedding.domain,
@@ -450,7 +545,9 @@ class FNScircuit(bp.Network):
             positions_post=self.E.positions,
             boundary=boundary,
             include_self=include_self,
+            seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         conn_ei = DistanceDependent(
             kernel=GaussianKernel(sigma=sigma_ei, p_max=p_ei),
             domain=self.E.embedding.domain,
@@ -458,7 +555,9 @@ class FNScircuit(bp.Network):
             positions_post=self.I.positions,
             boundary=boundary,
             include_self=include_self,
+            seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         conn_ie = DistanceDependent(
             kernel=GaussianKernel(sigma=sigma_ie, p_max=p_ie),
             domain=self.I.embedding.domain,
@@ -466,7 +565,9 @@ class FNScircuit(bp.Network):
             positions_post=self.E.positions,
             boundary=boundary,
             include_self=include_self,
+            seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         conn_ii = DistanceDependent(
             kernel=GaussianKernel(sigma=sigma_ii, p_max=p_ii),
             domain=self.I.embedding.domain,
@@ -474,6 +575,7 @@ class FNScircuit(bp.Network):
             positions_post=self.I.positions,
             boundary=boundary,
             include_self=include_self,
+            seed=subkey,
         )
 
         # Synapses
@@ -481,6 +583,7 @@ class FNScircuit(bp.Network):
         tau_d_i = 1.0
         V_rev_e = 0.0
         V_rev_i = -80  # ? Makes the inhibitory synapses inhibitory
+
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
@@ -491,6 +594,7 @@ class FNScircuit(bp.Network):
             g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
             V_rev=V_rev_e,
         )
+
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
@@ -501,6 +605,7 @@ class FNScircuit(bp.Network):
             g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
             V_rev=V_rev_e,
         )
+
         self.I2E = Synapse(
             pre=self.I,
             post=self.E,
@@ -511,6 +616,7 @@ class FNScircuit(bp.Network):
             g_max=bp.init.Normal(self.J_i, self.J_i * 0.05),
             V_rev=V_rev_i,
         )
+
         self.I2I = Synapse(
             pre=self.I,
             post=self.I,
@@ -525,6 +631,7 @@ class FNScircuit(bp.Network):
         # External population
         p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
         N_ext = int(np.round(self.E.num * p_ext))
+        self.key, subkey = jax.random.split(self.key)
         self.ext = bp.dyn.PoissonGroup(
             size=N_ext,
             freqs=self.nu,
@@ -533,20 +640,22 @@ class FNScircuit(bp.Network):
             spk_type=None,
             name=None,
             mode=None,
-            seed=None,
+            seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True),
+            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
@@ -557,6 +666,16 @@ class FNScircuit(bp.Network):
         self.Iin = bp.dyn.InputVar(self.I.varshape)
         self.E.add_inp_fun("", self.Ein)
         self.I.add_inp_fun("", self.Iin)
+
+        # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
+        self.key, subkey = jax.random.split(self.key)
+        self.E2E.proj.comm.weight = correlate_weights(self.E2E.proj, self.J_e, subkey)
+        self.key, subkey = jax.random.split(self.key)
+        self.E2I.proj.comm.weight = correlate_weights(self.E2I.proj, self.J_e, subkey)
+        self.key, subkey = jax.random.split(self.key)
+        self.I2E.proj.comm.weight = correlate_weights(self.I2E.proj, self.J_i, subkey)
+        self.key, subkey = jax.random.split(self.key)
+        self.I2I.proj.comm.weight = correlate_weights(self.I2I.proj, self.J_i, subkey)
 
     def to_dict(
         self,

@@ -50,17 +50,38 @@ class GridPositions(AbstractPositions):
 
 
 class RandomPositions(AbstractPositions):
-    def __init__(self, domain):
+    def __init__(self, domain, key=None):
+        super().__init__()
         self.domain = self.cast_to_tuple(domain)
+        # If no key is provided, just generate one from a random seed
+        if key is None:
+            key = jax.random.PRNGKey(42)
+        self.key = key
 
     def __call__(self, shape):
+        """
+        Generates random (x, y, ...) positions within 'domain' for the given 'shape'.
+        Returns a JAX array of shape (N, D), where N = prod(shape) and D = len(domain).
+        """
         shape = self.cast_to_tuple(shape)
         total_positions = np.prod(shape)
-        positions = []
+
+        coords = []
+        key = self.key
+
+        # For each dimension s in domain, sample total_positions from Uniform(0, s)
         for s in self.domain:
-            positions.append(np.random.uniform(0, s, total_positions))
-        positions = list(zip(*positions))
-        return positions
+            key, subkey = jax.random.split(key)
+            arr = jax.random.uniform(subkey, shape=(total_positions,)) * s
+            coords.append(arr)
+
+        # coords is a list of D arrays [ (N,), (N,), ... ]
+        # Stack along axis=1 to get shape (N, D)
+        coords = jnp.stack(coords, axis=1)
+
+        # Update this object's key to avoid reusing it
+        self.key = key
+        return coords
 
     def to_dict(self):
         return {"domain": self.domain}
