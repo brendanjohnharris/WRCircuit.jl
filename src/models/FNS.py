@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
+from jax import lax
 import uuid
 from scipy.integrate import dblquad
 
@@ -301,12 +302,6 @@ class DistanceDependent(TwoEndConnector):
         # Compute the indptr array
         indptrs = jnp.concatenate([jnp.array([0]), jnp.cumsum(pre_nums)])
 
-        # # Debug: Print intermediate results
-        # print("post_ids (column indices):", post_ids)
-        # print("pre_ids (row indices):", pre_ids)
-        # print("pre_nums (non-zero counts per row):", pre_nums)
-        # print("indptrs (CSR indptr array):", indptrs)
-
         return post_ids.astype(get_idx_type()), indptrs.astype(get_idx_type())
 
     def to_dict(self, keys=["boundary", "include_self"]):
@@ -401,11 +396,13 @@ def expected_indegree(FNSnet, pop="ee", approx=True):
         )
         return rho * result
 
+
 def indegrees(proj):
     N = jnp.prod(jnp.array(proj.post.size))
     indices = jnp.array(proj.comm.indices, dtype=int)
     in_degree = jnp.bincount(indices, length=N)
     return in_degree
+
 
 def indegree(proj):
     N = jnp.prod(jnp.array(proj.post.size))
@@ -413,14 +410,17 @@ def indegree(proj):
     in_degree = jnp.bincount(indices, length=N)
     return jnp.mean(in_degree)
 
+
 def correlate_weights(proj, J, key):
     k = indegrees(proj)
 
-    nonzero_mask = (k > 0)
+    nonzero_mask = k > 0
     k_nonzero = jnp.where(nonzero_mask, k, 0)
-    sqrtk_nonzero = jnp.sqrt(jnp.where(nonzero_mask, k, 1))  # sqrt(k[i]) if k>0, else sqrt(1)=1 to avoid nans
+    sqrtk_nonzero = jnp.sqrt(
+        jnp.where(nonzero_mask, k, 1)
+    )  # sqrt(k[i]) if k>0, else sqrt(1)=1 to avoid nans
 
-    sum_k    = jnp.sum(k_nonzero)
+    sum_k = jnp.sum(k_nonzero)
     sum_sqrt = jnp.sum(sqrtk_nonzero)
     # If *all* k are zero, sum_sqrt=0 => we define J_rec=0
     J_rec = jnp.where(sum_sqrt > 0, J * sum_k / sum_sqrt, 0.0)
@@ -444,11 +444,12 @@ def correlate_weights(proj, J, key):
 
     return new_ws
 
+
 class FNScircuit(bp.Network):
     def __init__(
         self,
         rho=30000,  # Density of Exc. neurons (neurons per mm^2)
-        dx=1,  # Width of the spatial domain (mm)
+        dx=1.5,  # Width of the spatial domain (mm)
         sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
         sigma_ei=0.1,
         sigma_ie=0.1,
@@ -465,7 +466,7 @@ class FNScircuit(bp.Network):
         n_ext=10,  # Number of external synapses per Exc. neuron
         J_e=0.0004,  # ! Currently abitrary. Has same units as g_L? uS
         method="exp_auto",
-        key = jax.random.PRNGKey(np.random.randint(0, 2**32))
+        key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
     ):
         super().__init__()
         self.rho = rho
@@ -651,15 +652,16 @@ class FNScircuit(bp.Network):
             tau_d=tau_d_e,
             g_max=self.J_e,
         )
-        self.key, subkey = jax.random.split(self.key)
-        self.ext2I = Synapse(
-            pre=self.ext,
-            post=self.I,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
-            delay=2.0,
-            tau_d=tau_d_e,
-            g_max=self.J_e,
-        )
+        # * No external inputs to inhibitory neurons
+        # self.key, subkey = jax.random.split(self.key)
+        # self.ext2I = Synapse(
+        #     pre=self.ext,
+        #     post=self.I,
+        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
+        #     delay=2.0,
+        #     tau_d=tau_d_e,
+        #     g_max=self.J_e,
+        # )
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)
@@ -668,6 +670,10 @@ class FNScircuit(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
+        self.reinit_weights(self.zeta)
+
+    def reinit_weights(self, zeta):
+        self.J_i = self.J_e * zeta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(self.E2E.proj, self.J_e, subkey)
         self.key, subkey = jax.random.split(self.key)
@@ -676,6 +682,10 @@ class FNScircuit(bp.Network):
         self.I2E.proj.comm.weight = correlate_weights(self.I2E.proj, self.J_i, subkey)
         self.key, subkey = jax.random.split(self.key)
         self.I2I.proj.comm.weight = correlate_weights(self.I2I.proj, self.J_i, subkey)
+        self.key, subkey = jax.random.split(self.key)
+        self.ext2E.proj.comm.weight = correlate_weights(
+            self.ext2E.proj, self.J_e, subkey
+        )
 
     def to_dict(
         self,

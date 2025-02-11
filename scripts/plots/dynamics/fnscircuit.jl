@@ -16,6 +16,8 @@ modelname = "FNScircuit"
 begin # * Simulate
     m = model(; rho = 30000, nu = 100.0, n_ext = 10, J_e = 0.0005, zeta = 2)
     m.to_dict()
+    # * check reinit is ok
+    m.reinit_weights(22)
 end
 begin
     T = 5500.0
