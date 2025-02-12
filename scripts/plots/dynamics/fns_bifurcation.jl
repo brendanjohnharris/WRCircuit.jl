@@ -15,19 +15,21 @@ model = models.FNScircuit
 modelname = "FNScircuit"
 T = 5500.0
 zetas = range(1, 40, length = 2)
-m = model(; rho = 30000, nu = 100.0, n_ext = 30, J_e = 0.0005, zeta = first(zetas),
-          key = jax.random.PRNGKey(rand(UInt32)))
+if !(@isdefined m)
+    m = model(; rho = 30000, nu = 40.0, n_ext = 50, J_e = 0.001, zeta = first(zetas),
+              key = jax.random.PRNGKey(rand(UInt32)))
+end
 N = m.E.size |> convert2(Vector)
 domain = m.E.embedding.domain |> convert2(Vector)
 dx = domain ./ N
 xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
 out = map(zetas) do zeta
+    @info "ζ = $zeta"
     m.reinit_weights(zeta)
+    brainpy.reset_state(m)
     res = bpsolve(m, T; populations = [:E], vars = [:spike])
     spikes = res[Var = At(:spike)][Population = At(:E)]
     begin # * susecptibility
-        x = spikes[1, :]
-
         dt = 10u"ms"
         x = sum.(coarsegrain(spikes, dt)) # Bin over time
         x = map(eachslice(x, dims = 1)) do x

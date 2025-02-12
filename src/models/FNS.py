@@ -221,13 +221,14 @@ class DistanceDependent(TwoEndConnector):
     #         diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
     #         conn_mat = conn_mat.at[diag_indices].set(False)
     #     return conn_mat
-
     def build_csr(self):
-        # Precompute distances
+        # -------------------------------------------------------------------------
+        # Helper: Compute distance with different boundary adjustments.
         @partial(jit, static_argnums=(2, 3))
         def compute_distance_with_boundary(
             pos_pre, pos_post, boundary_code, distance_metric
         ):
+            # Compute differences
             delta = pos_pre - pos_post
 
             # Periodic boundary adjustment
@@ -252,57 +253,100 @@ class DistanceDependent(TwoEndConnector):
                 outside, jnp.inf, distance_metric(pos_pre, pos_post)
             )
 
-            # None boundary adjustment
+            # No boundary adjustment
             dist_none = distance_metric(pos_pre, pos_post)
 
-            # Select the appropriate distance based on boundary_code
             distances = jnp.stack(
                 [dist_periodic, dist_reflecting, dist_absorbing, dist_none]
             )
             return distances[boundary_code]
 
-        # Vectorize distance computation
-        compute_distance_vmap = vmap(
-            vmap(compute_distance_with_boundary, in_axes=(None, 0, None, None)),
-            in_axes=(0, None, None, None),
+        # -------------------------------------------------------------------------
+        # Helper: Compute distances from one pre–neuron to all post–neurons.
+        def compute_row_distances(pos_pre):
+            return vmap(
+                lambda pos_post: compute_distance_with_boundary(
+                    pos_pre, pos_post, self.boundary_code, self.distance_metric
+                )
+            )(self.positions_post)
+
+        # -------------------------------------------------------------------------
+        # To help JIT compilation, capture some attributes as local variables.
+        include_self = self.include_self
+        num_pre_neurons = self.num_pre_neurons
+        num_post_neurons = self.num_post_neurons
+        domain = (
+            self.domain
+        )  # if needed inside compute_distance (already used via self)
+
+        # -------------------------------------------------------------------------
+        # Jitted inner function: process a chunk of pre–neurons.
+        # (Note: We removed the jnp.where for the connections indices from inside the JIT.)
+        @jit
+        def process_chunk_inner(pre_chunk, key, start):
+            # Compute distances for all rows in this chunk (via double vmap)
+            distances = vmap(compute_row_distances)(
+                pre_chunk
+            )  # shape: (chunk_size, num_post_neurons)
+            probs = self.kernel(distances)
+            key, subkey = jax.random.split(key)
+            rand_vals = jax.random.uniform(subkey, shape=probs.shape)
+            connections = probs > rand_vals
+
+            # Remove self–connections if needed.
+            if not include_self:
+                # For each row in the chunk, the global row index is start + row_index.
+                chunk_len = pre_chunk.shape[0]
+                global_indices = jnp.arange(start, start + chunk_len)
+                # Only remove self–connections for rows that are within the smaller of the two populations.
+                min_neurons = jnp.minimum(num_pre_neurons, num_post_neurons)
+                valid = global_indices < min_neurons
+                # (Since valid is of known (chunk) size, this jnp.where is okay here.)
+                rows_to_fix = jnp.where(valid)[0]
+                cols_to_fix = global_indices[valid]
+                connections = connections.at[rows_to_fix, cols_to_fix].set(False)
+
+            counts = jnp.sum(
+                connections, axis=1
+            )  # number of connections per row in this chunk
+            return key, connections, counts
+
+        # -------------------------------------------------------------------------
+        # Loop over pre–neurons in chunks.
+        CHUNK_SIZE = 2**14  # Adjust as appropriate.
+        num_pre = self.num_pre_neurons
+        key = self.key  # current random key
+
+        pre_idx_list = []  # will hold global row indices of connections
+        post_idx_list = []  # will hold column indices of connections
+        count_list = []  # per–row connection counts
+
+        # Process each chunk sequentially.
+        for start in range(0, num_pre, CHUNK_SIZE):
+            pre_chunk = self.positions_pre[start : start + CHUNK_SIZE]
+            key, connections, counts = process_chunk_inner(pre_chunk, key, start)
+            # --- IMPORTANT: Do the nonzero (jnp.where) outside the JIT to avoid dynamic shape issues.
+            chunk_pre_idx, chunk_post_idx = jnp.where(connections)
+            global_pre_idx = (
+                chunk_pre_idx + start
+            )  # convert local (chunk) row indices to global ones
+            pre_idx_list.append(global_pre_idx)
+            post_idx_list.append(chunk_post_idx)
+            count_list.append(counts)
+
+        # Update the random key.
+        self.key = key
+
+        # Concatenate results from all chunks.
+        pre_ids = jnp.concatenate(pre_idx_list)
+        post_ids = jnp.concatenate(post_idx_list)
+        row_counts = jnp.concatenate(count_list)
+        indptr = jnp.concatenate(
+            [jnp.array([0], dtype=row_counts.dtype), jnp.cumsum(row_counts)]
         )
 
-        # Precompute the distance matrix
-        distance_matrix = compute_distance_vmap(
-            self.positions_pre,
-            self.positions_post,
-            self.boundary_code,
-            self.distance_metric,
-        )
-
-        # Compute probabilities using the kernel
-        probabilities = self.kernel(distance_matrix)
-
-        # Generate random numbers only for non-zero probabilities
-        self.key, subkey = jax.random.split(self.key)
-        random_values = jax.random.uniform(subkey, shape=probabilities.shape)
-        connections = probabilities > random_values
-
-        # Remove self-connections if needed
-        if not self.include_self:
-            min_neurons = min(self.num_pre_neurons, self.num_post_neurons)
-            diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
-            connections = connections.at[diag_indices].set(False)
-
-        # Convert to sparse CSR format
-        pre_ids, post_ids = jnp.where(connections)
-
-        # Ensure indices are within bounds
-        assert jnp.all(pre_ids < self.num_pre_neurons), "pre_ids out of bounds"
-        assert jnp.all(post_ids < self.num_post_neurons), "post_ids out of bounds"
-
-        # Compute the number of non-zero elements per row
-        pre_nums = jnp.bincount(pre_ids, length=self.num_pre_neurons)
-
-        # Compute the indptr array
-        indptrs = jnp.concatenate([jnp.array([0]), jnp.cumsum(pre_nums)])
-
-        return post_ids.astype(get_idx_type()), indptrs.astype(get_idx_type())
+        # Cast the indices to the desired index type and return.
+        return post_ids.astype(get_idx_type()), indptr.astype(get_idx_type())
 
     def to_dict(self, keys=["boundary", "include_self"]):
         out = {key: value for key, value in self.__dict__.items() if key in keys}
@@ -348,6 +392,55 @@ class GaussianKernel(AbstractKernel):
         return self.p_max * jnp.exp(-(distance**2) / (2 * self.sigma**2))
 
     def to_dict(self):
+        return {"sigma": self.sigma, "p_max": self.p_max}
+
+
+class ExponentialKernel(AbstractKernel):
+    """
+    Exponential kernel for a distance-dependent connector.
+
+    Parameters
+    ----------
+    sigma : float, keyword-only
+        Decay constant (length scale) for the exponential kernel.
+    p_max : float, optional
+        Maximum probability of connection (default is 1.0).
+    """
+
+    def __init__(self, sigma, p_max=1.0):
+        self.sigma = sigma
+        self.p_max = p_max
+
+        # You might want to call the parent class's __init__ if necessary.
+        # For example:
+        # super(ExponentialKernel, self).__init__(
+        #     domain=domain,
+        #     positions_pre=pre_positions,
+        #     positions_post=post_positions,
+        #     kernel=exponential_kernel,
+        #     **kwargs,
+        # )
+
+    def __call__(self, distance):
+        """
+        Compute the connection probability given a distance.
+
+        Parameters
+        ----------
+        distance : float or array-like
+            The distance(s) between pre- and post-synaptic neurons.
+
+        Returns
+        -------
+        float or array-like
+            The connection probability.
+        """
+        return self.p_max * jnp.exp(-distance / self.sigma)
+
+    def to_dict(self):
+        """
+        Return a dictionary representation of the kernel's parameters.
+        """
         return {"sigma": self.sigma, "p_max": self.p_max}
 
 
@@ -449,7 +542,7 @@ class FNScircuit(bp.Network):
     def __init__(
         self,
         rho=30000,  # Density of Exc. neurons (neurons per mm^2)
-        dx=1.5,  # Width of the spatial domain (mm)
+        dx=1.0,  # Width of the spatial domain (mm)
         sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
         sigma_ei=0.1,
         sigma_ie=0.1,
@@ -465,6 +558,7 @@ class FNScircuit(bp.Network):
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
         J_e=0.0004,  # ! Currently abitrary. Has same units as g_L? uS
+        kernel=GaussianKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
     ):
@@ -513,7 +607,8 @@ class FNScircuit(bp.Network):
             V_th=-50.0,
             V_rt=-60.0,
             tau_ref=4.0,
-            tau_K=80.0,
+            V_K=-85.0,
+            tau_K=60.0,
             Delta_g_K=0.002,
             V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
@@ -525,12 +620,13 @@ class FNScircuit(bp.Network):
         self.I = FNSNeuron(
             size=ni,
             C=0.25,
-            g_L=0.0167,
+            g_L=0.025,
             V_L=-70.0,
             V_th=-50.0,
             V_rt=-60.0,
             tau_ref=4.0,
-            tau_K=80.0,
+            V_K=-85.0,
+            tau_K=60.0,
             Delta_g_K=0.0,  # No adaptation for inhibitory neurons
             V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
@@ -540,7 +636,7 @@ class FNScircuit(bp.Network):
         # Connectivity topology
         self.key, subkey = jax.random.split(self.key)
         conn_ee = DistanceDependent(
-            kernel=GaussianKernel(sigma=sigma_ee, p_max=p_ee),
+            kernel=kernel(sigma=sigma_ee, p_max=p_ee),
             domain=self.E.embedding.domain,
             positions_pre=self.E.positions,
             positions_post=self.E.positions,
@@ -550,7 +646,7 @@ class FNScircuit(bp.Network):
         )
         self.key, subkey = jax.random.split(self.key)
         conn_ei = DistanceDependent(
-            kernel=GaussianKernel(sigma=sigma_ei, p_max=p_ei),
+            kernel=kernel(sigma=sigma_ei, p_max=p_ei),
             domain=self.E.embedding.domain,
             positions_pre=self.E.positions,
             positions_post=self.I.positions,
@@ -560,7 +656,7 @@ class FNScircuit(bp.Network):
         )
         self.key, subkey = jax.random.split(self.key)
         conn_ie = DistanceDependent(
-            kernel=GaussianKernel(sigma=sigma_ie, p_max=p_ie),
+            kernel=kernel(sigma=sigma_ie, p_max=p_ie),
             domain=self.I.embedding.domain,
             positions_pre=self.I.positions,
             positions_post=self.E.positions,
@@ -570,7 +666,7 @@ class FNScircuit(bp.Network):
         )
         self.key, subkey = jax.random.split(self.key)
         conn_ii = DistanceDependent(
-            kernel=GaussianKernel(sigma=sigma_ii, p_max=p_ii),
+            kernel=kernel(sigma=sigma_ii, p_max=p_ii),
             domain=self.I.embedding.domain,
             positions_pre=self.I.positions,
             positions_post=self.I.positions,
@@ -652,7 +748,7 @@ class FNScircuit(bp.Network):
             tau_d=tau_d_e,
             g_max=self.J_e,
         )
-        # * No external inputs to inhibitory neurons
+        # # * No external inputs to inhibitory neurons
         # self.key, subkey = jax.random.split(self.key)
         # self.ext2I = Synapse(
         #     pre=self.ext,
@@ -670,10 +766,14 @@ class FNScircuit(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.zeta)
+        self.reinit_weights(self.zeta)  # !! Need to fix it seems
 
-    def reinit_weights(self, zeta):
-        self.J_i = self.J_e * zeta
+    def reinit_weights(self, zeta=None, J_e=None):
+        if zeta:
+            self.zeta = zeta
+        if J_e:
+            self.J_e = J_e
+        self.J_i = self.J_e * self.zeta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(self.E2E.proj, self.J_e, subkey)
         self.key, subkey = jax.random.split(self.key)
@@ -686,6 +786,12 @@ class FNScircuit(bp.Network):
         self.ext2E.proj.comm.weight = correlate_weights(
             self.ext2E.proj, self.J_e, subkey
         )
+        self.reset_state()  ## or bp.reset_state(self)??
+
+    def reinit_nu(self, nu):
+        self.nu = nu
+        self.ext.freqs = nu
+        self.reset_state()
 
     def to_dict(
         self,
