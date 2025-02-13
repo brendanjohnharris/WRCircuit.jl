@@ -97,7 +97,7 @@ class DistanceDependent(TwoEndConnector):
         positions_post=None,
         boundary="periodic",
         distance_metric=euclidean_distance,
-        include_self=True,
+        include_self=False,
         seed=None,
         **kwargs,
     ):
@@ -282,7 +282,7 @@ class DistanceDependent(TwoEndConnector):
         # -------------------------------------------------------------------------
         # Jitted inner function: process a chunk of pre–neurons.
         # (Note: We removed the jnp.where for the connections indices from inside the JIT.)
-        @jit
+        @partial(jit, static_argnums=(2,))
         def process_chunk_inner(pre_chunk, key, start):
             # Compute distances for all rows in this chunk (via double vmap)
             distances = vmap(compute_row_distances)(
@@ -295,16 +295,17 @@ class DistanceDependent(TwoEndConnector):
 
             # Remove self–connections if needed.
             if not include_self:
-                # For each row in the chunk, the global row index is start + row_index.
+                # For each row in the chunk, the global index is start + row_index.
                 chunk_len = pre_chunk.shape[0]
                 global_indices = jnp.arange(start, start + chunk_len)
-                # Only remove self–connections for rows that are within the smaller of the two populations.
                 min_neurons = jnp.minimum(num_pre_neurons, num_post_neurons)
-                valid = global_indices < min_neurons
-                # (Since valid is of known (chunk) size, this jnp.where is okay here.)
-                rows_to_fix = jnp.where(valid)[0]
-                cols_to_fix = global_indices[valid]
-                connections = connections.at[rows_to_fix, cols_to_fix].set(False)
+                rows = jnp.arange(chunk_len)
+                new_vals = jnp.where(
+                    global_indices < min_neurons,
+                    False,
+                    connections[rows, global_indices],
+                )
+                connections = connections.at[rows, global_indices].set(new_vals)
 
             counts = jnp.sum(
                 connections, axis=1
@@ -552,7 +553,7 @@ class FNScircuit(bp.Network):
         p_ie=0.3,
         p_ii=0.3,
         boundary="periodic",
-        include_self=True,
+        include_self=False,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         zeta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
@@ -605,12 +606,12 @@ class FNScircuit(bp.Network):
             g_L=0.0167,
             V_L=-70.0,
             V_th=-50.0,
-            V_rt=-60.0,
+            V_rt=-70.0,
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
             Delta_g_K=0.002,
-            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
+            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
         )
@@ -623,12 +624,12 @@ class FNScircuit(bp.Network):
             g_L=0.025,
             V_L=-70.0,
             V_th=-50.0,
-            V_rt=-60.0,
+            V_rt=-70.0,
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
             Delta_g_K=0.0,  # No adaptation for inhibitory neurons
-            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
+            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=inh_positions,
         )
@@ -679,7 +680,7 @@ class FNScircuit(bp.Network):
         tau_d_e = 4.0  # ! Maybe these are different? E2I gets tau_d_e?
         tau_d_i = 1.0
         V_rev_e = 0.0
-        V_rev_i = -80  # ? Makes the inhibitory synapses inhibitory
+        V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
         self.E2E = Synapse(
             pre=self.E,
@@ -748,16 +749,15 @@ class FNScircuit(bp.Network):
             tau_d=tau_d_e,
             g_max=self.J_e,
         )
-        # # * No external inputs to inhibitory neurons
-        # self.key, subkey = jax.random.split(self.key)
-        # self.ext2I = Synapse(
-        #     pre=self.ext,
-        #     post=self.I,
-        #     conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
-        #     delay=2.0,
-        #     tau_d=tau_d_e,
-        #     g_max=self.J_e,
-        # )
+        self.key, subkey = jax.random.split(self.key)
+        self.ext2I = Synapse(
+            pre=self.ext,
+            post=self.I,
+            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
+            delay=2.0,
+            tau_d=tau_d_e,
+            g_max=self.J_e,
+        )
 
         # define input variables given to E/I populations
         self.Ein = bp.dyn.InputVar(self.E.varshape)
@@ -785,6 +785,10 @@ class FNScircuit(bp.Network):
         self.key, subkey = jax.random.split(self.key)
         self.ext2E.proj.comm.weight = correlate_weights(
             self.ext2E.proj, self.J_e, subkey
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.ext2I.proj.comm.weight = correlate_weights(
+            self.ext2I.proj, self.J_e, subkey
         )
         self.reset_state()  ## or bp.reset_state(self)??
 

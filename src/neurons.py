@@ -203,7 +203,7 @@ class FNSNeuron(GradNeuDyn):
         self._g_K_initializer = is_initializer(g_K_initializer)
 
         # integral
-        self.integral = odeint(method=method, f=self.derivative)
+        self.integral = bp.odeint(bp.JointEq(self.dV, self.dg_K), method=method)
 
         # variables
         if init_var:
@@ -217,10 +217,6 @@ class FNSNeuron(GradNeuDyn):
     def dg_K(self, g_K, t):
         dg_Kdt = -g_K / self.tau_K
         return dg_Kdt
-
-    @property
-    def derivative(self):
-        return JointEq([self.dV, self.dg_K])
 
     def reset_state(self, batch_size=None, **kwargs):
         self.V = self.init_variable(self._V_initializer, batch_size)
