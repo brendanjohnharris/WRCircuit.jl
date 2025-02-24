@@ -10,47 +10,76 @@ using Dewdrop
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
-model = models.FNScircuit
-modelname = "FNScircuit"
+begin
+    model = models.FNScircuit
+    modelname = "FNScircuit"
+
+    # Shencong Parameters
+    delta = 0.007
+    dx = 128 * delta # Originally 64*delta # 64 x 64 integer grid, 7um spacing
+    rho = 20000 # 12000
+    p_ee = 0.8
+    p_ei = 0.7
+    p_ie = 0.4
+    p_ii = 0.57
+    sigma_ee = 7.5 * delta
+    sigma_ei = 9.5 * delta
+    sigma_ie = 19 * delta
+    sigma_ii = 19 * delta
+    J_e = 0.0008 # Microsiemens. In spontaneous simulation code. Different from main paper
+    kernel = models.FNS.ExponentialKernel
+end
 
 if !(@isdefined m) # * Simulate
-    m = model(; rho = 30000, nu = 35, n_ext = 50, J_e = 0.001, zeta = 8,
-              key = jax.random.PRNGKey(42),
-              )
+    # m = model(; rho = 30000, nu = 35, n_ext = 50, J_e = 0.001, zeta = 8,
+    #           key = jax.random.PRNGKey(42),
+    #           )
+    m = model(rho = rho, dx = dx, J_e = J_e,
+              nu = 2.5, n_ext = 25, zeta = 4,
+              p_ee = p_ee,
+              p_ei = p_ei,
+              p_ie = p_ie,
+              p_ii = p_ii,
+              sigma_ee = sigma_ee,
+              sigma_ei = sigma_ei,
+              sigma_ie = sigma_ie,
+              sigma_ii = sigma_ii,
+              kernel = kernel,
+              key = jax.random.PRNGKey(42))
 end
 begin
     # * check reinit is ok
-    m.reinit_weights(100)
-    m.reinit_nu(37)
+    m.reinit_weights(8)
+    m.reinit_nu(120)
     brainpy.reset_state(m)
     m.to_dict()
 end
 begin
-    T = 1500.0
+    T = 5000.0
     # cue = Dewdrop.numpy.array(m.E.V) |> convert2(Vector)
     # Cue = reshape(cue, convert2(Vector)(m.E.size)...)
     # Cue[:] .= 0.0
     # Cue[1:4, 1:4] .= 0.5 # Cue the bottom corner
     # cue = cue)
     # cue = repeat(cue, 1, Int(T÷convert2(Float32)(Dewdrop.brainpy.share["dt"])))
-    X = bpsolve(m, T; populations = [:E], vars = [:spike, :V, :input])#, inputs = [("Ein.input", cue)])
+    XX = bpsolve(m, T; populations = [:E], vars = [:spike, :V, :input])#, inputs = [("Ein.input", cue)])
 
-    V = X[Var = At(:V)]
-    input = X[Var = At(:input)]
-    spikes = X[Var = At(:spike)]
+    V = XX[Var = At(:V)]
+    input = XX[Var = At(:input)]
+    spikes = XX[Var = At(:spike)]
     pop = :E # Excitatory
     lines(input[1][1:1000, 1])
 end
 begin # * Animate spikes
     # T = 0u"ms" .. 1000u"ms"
-    dt = 10u"ms"
+    dt = 5u"ms"
     N = m.E.size |> convert2(Vector)
     domain = m.E.embedding.domain |> convert2(Vector)
     dx = domain ./ N
     xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
 
     f = Figure()
-    ax = Axis(f[1, 1])
+    ax = Axis(f[1, 1], aspect = DataAspect())
     x = spikes[1] # Excitatory spikes
     x = sum.(coarsegrain(x, dt)) # Bin over time
     x = set(x, 𝑡 => mean.(times(x))) |> ustripall # To unitless seconds
@@ -60,10 +89,10 @@ begin # * Animate spikes
     end
     _t = Observable(first(times(x)))
     colorrange = extrema(x)
-    heatmap!(ax, xs..., H; colorrange, colormap = :binary)
+    heatmap!(ax, xs..., H; colorrange, colormap = seethrough(reverse(cgrad(:inferno))))
     rm("network.mp4"; force = true)
     @info "Recording animation"
-    record(f, "network.mp4", eachindex(times(x)), framerate = 12) do i
+    record(f, "network.mp4", eachindex(times(x)), framerate = 24) do i
         h[] = parent(x[i, :])
         _t[] = times(x)[i]
     end
