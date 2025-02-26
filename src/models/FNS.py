@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 from jax import lax
-import uuid
+import copy
 from scipy.integrate import dblquad
 
 import brainpy as bp
@@ -491,7 +491,7 @@ def expected_indegree(FNSnet, pop="ee", approx=True):
         return rho * result
 
 
-def indegrees(proj):
+def indegrees(proj):  # ! NOT JAX COMPATIBLE???
     N = jnp.prod(jnp.array(proj.post.size))
     indices = jnp.array(proj.comm.indices, dtype=int)
     in_degree = jnp.bincount(indices, length=N)
@@ -539,6 +539,32 @@ def correlate_weights(proj, J, key):
     return new_ws
 
 
+class CSRConn(TwoEndConnector):
+    """Connector built from the CSR sparse connection matrix. Same as brainpy, but without
+    bounds checking to make it jax compatible"""
+
+    def __init__(self, indices, inptr, **kwargs):
+        super(CSRConn, self).__init__(**kwargs)
+
+        self.indices = jnp.asarray(indices, dtype=get_idx_type())
+        self.inptr = jnp.asarray(inptr, dtype=get_idx_type())
+        self.pre_num = self.inptr.size - 1
+        self.max_post = self.indices.max()
+
+    def build_csr(self):
+        # if self.pre_num != self.pre_num:
+        #     raise ConnectorError(
+        #         f"(pre_size, post_size) is inconsistent with "
+        #         f"the shape of the sparse matrix."
+        #     )
+        # if self.post_num <= self.max_post:
+        #     raise ConnectorError(
+        #         f"post_num ({self.post_num}) should be greater than "
+        #         f"the maximum id ({self.max_post}) of self.post_ids."
+        #     )
+        return self.indices, self.inptr
+
+
 class FNScircuit(bp.Network):
     def __init__(
         self,
@@ -562,8 +588,10 @@ class FNScircuit(bp.Network):
         kernel=GaussianKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
+        copy_conn=False,  # Whether to copy connectivity from the provided FNScircuit
     ):
         super().__init__()
+
         self.rho = rho
         self.dx = dx
         self.sigma_ee = sigma_ee
@@ -585,6 +613,7 @@ class FNScircuit(bp.Network):
             self.J_e * zeta
         )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
+        self.kernel = kernel
         self.key = key
 
         # geometry
@@ -635,46 +664,80 @@ class FNScircuit(bp.Network):
         )
 
         # Connectivity topology
-        self.key, subkey = jax.random.split(self.key)
-        conn_ee = DistanceDependent(
-            kernel=kernel(sigma=sigma_ee, p_max=p_ee),
-            domain=self.E.embedding.domain,
-            positions_pre=self.E.positions,
-            positions_post=self.E.positions,
-            boundary=boundary,
-            include_self=include_self,
-            seed=subkey,
-        )
-        self.key, subkey = jax.random.split(self.key)
-        conn_ei = DistanceDependent(
-            kernel=kernel(sigma=sigma_ei, p_max=p_ei),
-            domain=self.E.embedding.domain,
-            positions_pre=self.E.positions,
-            positions_post=self.I.positions,
-            boundary=boundary,
-            include_self=include_self,
-            seed=subkey,
-        )
-        self.key, subkey = jax.random.split(self.key)
-        conn_ie = DistanceDependent(
-            kernel=kernel(sigma=sigma_ie, p_max=p_ie),
-            domain=self.I.embedding.domain,
-            positions_pre=self.I.positions,
-            positions_post=self.E.positions,
-            boundary=boundary,
-            include_self=include_self,
-            seed=subkey,
-        )
-        self.key, subkey = jax.random.split(self.key)
-        conn_ii = DistanceDependent(
-            kernel=kernel(sigma=sigma_ii, p_max=p_ii),
-            domain=self.I.embedding.domain,
-            positions_pre=self.I.positions,
-            positions_post=self.I.positions,
-            boundary=boundary,
-            include_self=include_self,
-            seed=subkey,
-        )
+
+        # External population
+        p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
+        N_ext = int(np.round(self.E.num * p_ext))
+
+        def copy_connectivity(proj):
+            # if isinstance(proj, bp.Projection):
+            #     indices = copy.deepcopy(proj.comm.indices)
+            #     inptr = copy.deepcopy(proj.comm.indptr)
+            # else:
+            indices = copy.deepcopy(proj["indices"])
+            inptr = copy.deepcopy(proj["indptr"])
+            return CSRConn(indices, inptr)
+
+        if copy_conn:
+            if isinstance(copy_conn, FNScircuit):
+                copy_conn = copy_conn.get_connectivity()
+            conn_ee = copy_connectivity(copy_conn["E2E"])
+            conn_ei = copy_connectivity(copy_conn["E2I"])
+            conn_ie = copy_connectivity(copy_conn["I2E"])
+            conn_ii = copy_connectivity(copy_conn["I2I"])
+            conn_exte = copy_connectivity(copy_conn["ext2E"])
+            conn_exti = copy_connectivity(copy_conn["ext2I"])
+
+        else:
+            self.key, subkey = jax.random.split(self.key)
+            conn_ee = DistanceDependent(
+                kernel=kernel(sigma=sigma_ee, p_max=p_ee),
+                domain=self.E.embedding.domain,
+                positions_pre=self.E.positions,
+                positions_post=self.E.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_ei = DistanceDependent(
+                kernel=kernel(sigma=sigma_ei, p_max=p_ei),
+                domain=self.E.embedding.domain,
+                positions_pre=self.E.positions,
+                positions_post=self.I.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_ie = DistanceDependent(
+                kernel=kernel(sigma=sigma_ie, p_max=p_ie),
+                domain=self.I.embedding.domain,
+                positions_pre=self.I.positions,
+                positions_post=self.E.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_ii = DistanceDependent(
+                kernel=kernel(sigma=sigma_ii, p_max=p_ii),
+                domain=self.I.embedding.domain,
+                positions_pre=self.I.positions,
+                positions_post=self.I.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+
+            self.key, subkey = jax.random.split(self.key)
+            conn_exte = bp.connect.FixedProb(
+                prob=p_ext, allow_multi_conn=True, seed=subkey
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_exti = bp.connect.FixedProb(
+                prob=p_ext, allow_multi_conn=True, seed=subkey
+            )
 
         # Synapses
         tau_d_e = 4.0  # ! Maybe these are different? E2I gets tau_d_e?
@@ -727,8 +790,6 @@ class FNScircuit(bp.Network):
         )
 
         # External population
-        p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
-        N_ext = int(np.round(self.E.num * p_ext))
         self.key, subkey = jax.random.split(self.key)
         self.ext = bp.dyn.PoissonGroup(
             size=N_ext,
@@ -740,20 +801,18 @@ class FNScircuit(bp.Network):
             mode=None,
             seed=subkey,
         )
-        self.key, subkey = jax.random.split(self.key)
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
+            conn=conn_exte,
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
         )
-        self.key, subkey = jax.random.split(self.key)
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,
-            conn=bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey),
+            conn=conn_exti,
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
@@ -766,7 +825,7 @@ class FNScircuit(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.zeta)  # !! Need to fix it seems
+        self.reinit_weights(self.zeta, self.J_e)  # !! Need to fix it seems
 
     def reinit_weights(self, zeta=None, J_e=None):
         if zeta:
@@ -796,6 +855,73 @@ class FNScircuit(bp.Network):
         self.nu = nu
         self.ext.freqs = nu
         self.reset_state()
+
+    def get_connectivity(self):
+        # Extract just the connectivity indices and inptrs
+        return {
+            "E2E": {
+                "indices": self.E2E.proj.comm.indices,
+                "indptr": self.E2E.proj.comm.indptr,
+            },
+            "E2I": {
+                "indices": self.E2I.proj.comm.indices,
+                "indptr": self.E2I.proj.comm.indptr,
+            },
+            "I2E": {
+                "indices": self.I2E.proj.comm.indices,
+                "indptr": self.I2E.proj.comm.indptr,
+            },
+            "I2I": {
+                "indices": self.I2I.proj.comm.indices,
+                "indptr": self.I2I.proj.comm.indptr,
+            },
+            "ext2E": {
+                "indices": self.ext2E.proj.comm.indices,
+                "indptr": self.ext2E.proj.comm.indptr,
+            },
+            "ext2I": {
+                "indices": self.ext2I.proj.comm.indices,
+                "indptr": self.ext2I.proj.comm.indptr,
+            },
+        }
+
+    def get_input_params(self):
+        keys = [
+            "rho",
+            "dx",
+            "sigma_ee",
+            "sigma_ei",
+            "sigma_ie",
+            "sigma_ii",
+            "p_ee",
+            "p_ei",
+            "p_ie",
+            "p_ii",
+            "boundary",
+            "include_self",
+            "gamma",
+            "zeta",
+            "nu",
+            "n_ext",
+            "J_e",
+            "kernel",
+            "method",
+            "key",
+        ]
+        _params = {key: value for key, value in self.__dict__.items() if key in keys}
+        if len(_params) != len(keys):
+            missings = set(keys) - set(_params.keys())
+            raise ValueError("Missing parameters: {}".format(missings))
+        return _params
+
+    def update_copy(self, **params):
+        _params = self.get_input_params()
+        params = {**_params, **params}
+        new_model = self.__class__(copy_conn=self, **params)
+        new_model.reinit_weights(params["zeta"], params["J_e"])
+        new_model.reinit_nu(params["nu"])
+        bp.reset_state(new_model)
+        return new_model
 
     def to_dict(
         self,

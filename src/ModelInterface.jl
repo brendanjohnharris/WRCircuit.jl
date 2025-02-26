@@ -14,8 +14,11 @@ function bprun(net::Py, time; monitors = ("E.spike", "I.spike", "E.V", "I.V"), j
     runner.run(time)
     return runner
 end
-
-function bpsolve(net::Py, time; populations = [:E, :I], vars = [:V], transient = 500u"ms",
+function bpsolve(net::Py, time::Quantity; kwargs...)
+    bpsolve(net, ustrip(uconvert(u"ms", time)); kwargs...)
+end
+function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
+                 transient = 500u"ms",
                  inputs = nothing,
                  kwargs...)
     ps = collect(Iterators.product(populations, vars))[:]
