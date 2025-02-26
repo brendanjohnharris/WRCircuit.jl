@@ -640,7 +640,7 @@ class FNScircuit(bp.Network):
             V_K=-85.0,
             tau_K=60.0,
             Delta_g_K=0.002,
-            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
+            V_initializer=bp.init.Uniform(-85.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
         )
@@ -740,8 +740,8 @@ class FNScircuit(bp.Network):
             )
 
         # Synapses
-        tau_d_e = 4.0  # ! Maybe these are different? E2I gets tau_d_e?
-        tau_d_i = 1.0
+        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
+        tau_d_i = 4.5
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
@@ -761,7 +761,7 @@ class FNScircuit(bp.Network):
             post=self.I,
             delay=2.0,
             conn=conn_ei,
-            tau_d=tau_d_e,  # ! Is this tau_d_e or tau_d_i?
+            tau_d=tau_d_e,
             tau_r=1.0,
             g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
             V_rev=V_rev_e,

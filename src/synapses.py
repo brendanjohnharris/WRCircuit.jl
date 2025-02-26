@@ -3,6 +3,7 @@ import brainpy.math as bm
 from brainpy.connect import TwoEndConnector, All2All, One2One
 from brainpy.synapses import TwoEndConn, SynOut, SynSTP
 from brainpy.initialize import Initializer
+from brainpy._src.initialize.base import _InterLayerInitializer
 from brainpy.synouts import CUBA
 from typing import Union, Dict, Callable, Optional, Tuple
 import numpy as np
@@ -86,6 +87,41 @@ def maybe_initializer(x, exclude=["rng"]):
 #         self.indices, self.indptr
 
 
+class ScaledInitializer(_InterLayerInitializer):
+    """A wrapper that scales the output of any initializer by a constant factor.
+
+    Parameters
+    ----------
+    initializer : callable
+        The base initializer to wrap.
+    scale_factor : float
+        The constant factor by which to scale the initializer's output.
+    """
+
+    def __init__(self, initializer, scale_factor):
+        super(ScaledInitializer, self).__init__()
+        self.initializer = initializer
+        self.scale_factor = scale_factor
+
+    def __call__(self, shape, dtype=None):
+        # Call the wrapped initializer to get the initial weights.
+        if callable(self.initializer):
+            weights = self.initializer(shape, dtype=dtype)
+        elif isinstance(self.initializer, (int, float)):
+            # Create an array filled with the constant initializer value.
+            weights = jnp.full(shape, self.initializer, dtype=dtype or jnp.float32)
+        else:
+            raise ValueError("Initializer must be callable or a constant float value.")
+        # Scale the weights by the constant factor.
+        return self.scale_factor * weights
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(initializer={self.initializer}, "
+            f"scale_factor={self.scale_factor})"
+        )
+
+
 class Synapse(bp.Projection):
     def __init__(
         self,
@@ -110,18 +146,26 @@ class Synapse(bp.Projection):
 
         super().__init__(name=name, mode=mode)
 
+        # scaled_g_max = ScaledInitializer(  # Only for dual exponential synapse
+        #     initializer=g_max, scale_factor=1.0 / (tau_d - tau_r)
+        # )
         self.proj = bp.dyn.FullProjAlignPreSDMg(
             pre=pre,
             delay=self.delay,
-            # T_dur and T describe a rectangular pulse with unitary area, of duration T=tau_r
-            # and height T = 1/tau_r. Alpha is the binding constant, generally set to 1
-            syn=bp.dyn.AMPA.desc(
-                pre.num, alpha=1 / tau_r, beta=1 / tau_d, T=tau_r, T_dur=tau_r
-            ),
-            comm=bp.dnn.CSRLinear(  # ! The dtype warning comes from here. Why??
+            # # T_dur and T describe a rectangular pulse with unitary area, of duration T=tau_r
+            # # and height T = 1/tau_r. Alpha is the binding constant, generally set to 1
+            # syn=bp.dyn.AMPA.desc(
+            #     pre.num, alpha=1 / tau_r, beta=1 / tau_d, T=tau_r, T_dur=tau_r
+            # ),
+            # !!! YIFAN USES AMPA SYNAPSE, SHENCONG USES DUAL EXPONENTIAL SYNAPSE. MF!
+            syn=bp.dyn.DualExponV2.desc(
+                pre.num, tau_decay=tau_d, tau_rise=tau_r
+            ),  # Has a maximum response of 1
+            comm=bp.dnn.CSRLinear(
                 conn=conn(pre.size, post.size),
-                weight=g_max,  ### IMPORTANT DON"T USE EVENTCSRLINEAR MESSES WITH THE SYNAPSES. See https://github.com/brainpy/BrainPy/issues/654#issuecomment-2008556824
-            ),
+                # weight=1.0,
+                weight=g_max,  # Scales the output to g_max, the weight of the synapse
+            ),  ### IMPORTANT DON"T USE EVENTCSRLINEAR MESSES WITH THE SYNAPSES. See https://github.com/brainpy/BrainPy/issues/654#issuecomment-2008556824
             out=bp.dyn.COBA(E=V_rev),
             post=post,
         )
