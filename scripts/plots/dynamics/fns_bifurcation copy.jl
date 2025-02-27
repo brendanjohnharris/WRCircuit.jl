@@ -3,15 +3,14 @@
 #=
 exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# ENV["DEWDROP_BACKEND"] = "cpu" # ! This does nothing if set here...
-# ENV["CUDA_VISIBLE_DEVICES"] = ""
+ENV["DEWDROP_BACKEND"] = "cpu"
 using DrWatson
 DrWatson.@quickactivate
 using Dewdrop
 using JLD2
-using Suppressor
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
+brainpy.math.set_platform("cpu")
 
 begin
     model = models.FNScircuit
@@ -31,30 +30,27 @@ begin
         sigma_ii = 19 * delta
         kernel = models.FNS.ExponentialKernel
         J_e = 0.0008 # Microsiemens
-        zeta = 2.5
+        zeta = 4
         nu = 10
-        n_ext = 70 # 200
+        n_ext = 65 # 200
     end
-end
-begin
     @info "Building model"
-    parameters = (; rho,
-                  dx,
-                  J_e,
-                  nu,
-                  n_ext,
-                  zeta,
-                  p_ee,
-                  p_ei,
-                  p_ie,
-                  p_ii,
-                  sigma_ee,
-                  sigma_ei,
-                  sigma_ie,
-                  sigma_ii)
-    m = model(; key = jax.random.PRNGKey(42),
-              kernel = models.FNS.ExponentialKernel,
-              parameters...)
+    m = model(; rho,
+              dx,
+              J_e,
+              nu,
+              n_ext,
+              zeta,
+              p_ee,
+              p_ei,
+              p_ie,
+              p_ii,
+              sigma_ee,
+              sigma_ei,
+              sigma_ie,
+              sigma_ii,
+              kernel,
+              key = jax.random.PRNGKey(42))
     XX = bpsolve(m, 2000u"ms"; populations = [:E], vars = [:spike])
 
     spikes = XX[Var = At(:spike)]
@@ -87,38 +83,40 @@ begin # * Animate spikes
     @info "Animation saved to `./network.mp4`"
 end
 
-# N = m.E.size |> convert2(Vector)
-# domain = m.E.embedding.domain |> convert2(Vector)
-# Δx = domain ./ N
-# xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
+N = m.E.size |> convert2(Vector)
+domain = m.E.embedding.domain |> convert2(Vector)
+Δx = domain ./ N
+xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
+zetas = range(1, 50, length = 50)
+T = 10u"s"
+transient = 5000u"ms"
 
-# begin
-#     addprocs(1; env = ["DEWDROP_BACKEND" => "cpu", "CUDA_VISIBLE_DEVICES" => ""])
-#     @everywhere ENV["JULIA_CONDAPKG_OFFLINE"] = true
-#     # @everywhere ENV["TF_CPP_MIN_LOG_LEVEL"] = 0
-#     # @everywhere ENV["JAX_PLATFORM_NAME"] = "cpu"
-#     @everywhere ENV["DEWDROP_BACKEND"] = "cpu" # Does not seem to work after startup
-#     @everywhere using Dewdrop
-#     @everywhere using JLD2
-#     @everywhere jax.default_device = jax.devices("cpu")[0]
-#     @everywhere brainpy.math.set_platform("cpu")
-# end
 begin
-    zetas = range(1.5, 2.5, length = 15)
-    T = 15u"s"
-    transient = 5000u"ms"
+    addprocs(3)
+    @everywhere ENV["DEWDROP_BACKEND"] = "cpu"
+    @everywhere using Dewdrop
+    @everywhere using JLD2
+    @everywhere Dewdrop.@preamble
 end
 begin
-    conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
-    out = pmap(zetas) do zeta
+    # conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
+
+    out = pmap(zetas) do zeta # Maybe have to clear live arrays for each worker?
         @info "ζ = $zeta"
-        m̂ = models.FNScircuit(; key = jax.random.PRNGKey(42),
-                               kernel = models.FNS.ExponentialKernel,
-                               parameters...,
-                               zeta,
-                               copy_conn = conn)
+        m̂ = models.FNScircuit(rho = rho, dx = dx, J_e = J_e,
+                               nu = 120, n_ext = 25,
+                               zeta = zeta,
+                               p_ee = p_ee,
+                               p_ei = p_ei,
+                               p_ie = p_ie,
+                               p_ii = p_ii,
+                               sigma_ee = sigma_ee,
+                               sigma_ei = sigma_ei,
+                               sigma_ie = sigma_ie,
+                               sigma_ii = sigma_ii,
+                               kernel = kernel,
+                               key = jax.random.PRNGKey(42))
         res = bpsolve(m̂, T; populations = [:E], vars = [:spike], transient)
-        N = m̂.E.size |> convert2(Vector)
         spikes = res[Var = At(:spike)][Population = At(:E)]
         begin # * Susceptibility
             dt = 10u"ms"
@@ -133,20 +131,15 @@ begin
             λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
             λ = uconvert.(u"Hz", mean(λ))
         end
-        # Dewdrop.clear_live_arrays() # Does this operate @everywhere? Seems not
-        return χ, λ # Can only return non-python objects
+        Dewdrop.clear_live_arrays() # Does this operate @everywhere?
+        return χ, λ
     end
 end
-begin
-    χ = ToolsArray(first.(out), (Dim{:zeta}(zetas),))
-    λ = ToolsArray(last.(out), (Dim{:zeta}(zetas),))
-    save("fns_bifurcation.jld2", (@strdict χ λ))
-end
-begin
-    f = Figure()
-    ax = Axis(f[1, 1]; xlabel = "ζ", ylabel = "Susceptibility")
-    lines!(ax, χ)
-    ax = Axis(f[2, 1]; xlabel = "ζ", ylabel = "Mean firing rate (Hz)")
-    lines!(λ)
-    f
-end
+χ = ToolsArray(first.(out), (Dim{:zeta}(zetas),))
+λ = ToolsArray(last.(out), (Dim{:zeta}(zetas),))
+save("fns_bifurcation.jld2", (@strdict χ λ))
+
+# begin
+#     file = "fns_bifurcation.jld2"
+#     f = jldopen(file, "r")
+# end

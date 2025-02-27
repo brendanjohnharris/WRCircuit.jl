@@ -828,9 +828,9 @@ class FNScircuit(bp.Network):
         self.reinit_weights(self.zeta, self.J_e)  # !! Need to fix it seems
 
     def reinit_weights(self, zeta=None, J_e=None):
-        if zeta:
+        if zeta is not None:
             self.zeta = zeta
-        if J_e:
+        if J_e is not None:
             self.J_e = J_e
         self.J_i = self.J_e * self.zeta
         self.key, subkey = jax.random.split(self.key)
@@ -914,6 +914,12 @@ class FNScircuit(bp.Network):
             raise ValueError("Missing parameters: {}".format(missings))
         return _params
 
+    def copy(self):
+        _params = self.get_input_params()
+        new_model = self.__class__(copy_conn=self, **_params)
+        bp.reset_state(new_model)
+        return new_model
+
     def update_copy(self, **params):
         _params = self.get_input_params()
         params = {**_params, **params}
@@ -922,6 +928,28 @@ class FNScircuit(bp.Network):
         new_model.reinit_nu(params["nu"])
         bp.reset_state(new_model)
         return new_model
+
+    def sweep_zetas(
+        self, zetas, duration=1000.0, monitors=["E.spike"], num_parallel=20
+    ):
+        def copy_run(self, duration=1000.0, monitors=["E.spike"]):
+            def run(zeta):
+                new_model = self.copy()
+                new_model.reinit_weights(zeta)
+                bp.reset_state(new_model)
+                runner = bp.DSRunner(
+                    new_model, monitors=monitors, numpy_mon_after_run=False
+                )
+                runner.run(duration=duration)
+                return [runner.mon[m] for m in monitors]
+
+            return run
+
+        run = copy_run(self, duration=1000.0, monitors=["E.spike"])
+        res = bp.running.jax_vectorize_map(
+            run, [zetas], num_parallel=num_parallel, clear_buffer=False
+        )
+        res
 
     def to_dict(
         self,

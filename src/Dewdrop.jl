@@ -52,9 +52,11 @@ function __init__()
         backend = ENV["DEWDROP_BACKEND"]
         if backend == "cpu"
             jax.default_device = jax.devices("cpu")[0]
+            jax.config.update("jax_platform_name", "cpu")
             brainpy.math.set_platform("cpu")
         elseif backend == "gpu"
             jax.default_device = jax.devices("gpu")[0]
+            jax.config.update("jax_platform_name", "gpu")
             brainpy.math.set_platform("gpu")
         else
             @warn "Unknown Dewdrop.jl backend $backend"
