@@ -8,6 +8,7 @@
 *.mp4
 *.parquet
 .CondaPkg/
+.CondaPkg copy/
 .vscode
 /docs/Manifest.toml
 /docs/build/

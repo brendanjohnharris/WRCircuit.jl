@@ -412,7 +412,7 @@ class ExponentialKernel(AbstractKernel):
         self.sigma = sigma
         self.p_max = p_max
 
-        # You might want to call the parent class's __init__ if necessary.
+        # might want to call the parent class's __init__ if necessary.
         # For example:
         # super(ExponentialKernel, self).__init__(
         #     domain=domain,
@@ -443,52 +443,6 @@ class ExponentialKernel(AbstractKernel):
         Return a dictionary representation of the kernel's parameters.
         """
         return {"sigma": self.sigma, "p_max": self.p_max}
-
-
-def expected_indegree(FNSnet, pop="ee", approx=True):
-    """
-    Compute the mean indegree.
-    Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large dx/small sigma.
-    """
-    assert FNSnet.boundary == "periodic"
-    dx = FNSnet.dx
-    if pop[0] == "e":
-        rho = FNSnet.rho
-    else:
-        rho = FNSnet.rho / FNSnet.gamma
-    if pop == "ee":
-        p_max = FNSnet.p_ee
-        sigma = FNSnet.sigma_ee
-    elif pop == "ei":
-        p_max = FNSnet.p_ei
-        sigma = FNSnet.sigma_ei
-    elif pop == "ie":
-        p_max = FNSnet.p_ie
-        sigma = FNSnet.sigma_ie
-    elif pop == "ii":
-        p_max = FNSnet.p_ii
-        sigma = FNSnet.sigma_ii
-
-    if approx:
-        return 2 * np.pi * sigma**2 * p_max * rho
-    else:
-
-        def integrand(y, x, dx, sigma, p_max):
-            # y is integrated first, x second (dblquad's calling convention).
-            rx = min(x, dx - x)
-            ry = min(y, dx - y)
-            r2 = rx * rx + ry * ry
-            return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
-
-        result, error_est = dblquad(
-            integrand,
-            0,
-            dx,  # outer integral range for x
-            lambda x: 0,  # lower limit for y
-            lambda x: dx,  # upper limit for y
-            args=(dx, sigma, p_max),
-        )
-        return rho * result
 
 
 def indegrees(proj):  # ! NOT JAX COMPATIBLE???
@@ -584,7 +538,7 @@ class FNScircuit(bp.Network):
         zeta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0004,  # ! Currently abitrary. Has same units as g_L? uS
+        J_e=0.0008,  # ! Currently abitrary. Has same units as g_L? uS
         kernel=GaussianKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
@@ -640,7 +594,7 @@ class FNScircuit(bp.Network):
             V_K=-85.0,
             tau_K=60.0,
             Delta_g_K=0.002,
-            V_initializer=bp.init.Uniform(-85.0, -50.0, subkey),
+            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
         )
@@ -914,6 +868,102 @@ class FNScircuit(bp.Network):
             raise ValueError("Missing parameters: {}".format(missings))
         return _params
 
+    def expected_indegree(self, pop="ee", approx=True):
+        """
+        Compute the mean indegree.
+        Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large
+        dx/small sigma.
+        """
+        assert self.boundary == "periodic"
+        dx = self.dx
+        if pop[0] == "e":
+            rho = self.rho
+        else:
+            rho = self.rho / self.gamma
+        if pop == "ee":
+            p_max = self.p_ee
+            sigma = self.sigma_ee
+        elif pop == "ei":
+            p_max = self.p_ei
+            sigma = self.sigma_ei
+        elif pop == "ie":
+            p_max = self.p_ie
+            sigma = self.sigma_ie
+        elif pop == "ii":
+            p_max = self.p_ii
+            sigma = self.sigma_ii
+
+        if approx:
+            result = 2 * np.pi * sigma**2 * p_max
+        else:
+
+            def integrand(y, x, dx, sigma, p_max):
+                # y is integrated first, x second (dblquad's calling convention).
+                rx = min(x, dx - x)
+                ry = min(y, dx - y)
+                r2 = rx * rx + ry * ry
+                return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
+
+            result, error_est = dblquad(
+                integrand,
+                0,
+                dx,  # outer integral range for x
+                lambda x: 0,  # lower limit for y
+                lambda x: dx,  # upper limit for y
+                args=(dx, sigma, p_max),
+            )
+
+        return rho * result
+
+    def effective_zeta(self):
+        """
+        Calculate the effective IE ratio for inhibitory and excitatory populations.
+        The ratio represents total inhibitory strength divided by
+        total excitatory strength (for the average neuron) per neuron type.
+        """
+
+        projs = [self.E2E, self.E2I, self.I2E, self.I2I]
+        weights = [p.proj.comm.weight for p in projs]
+        indices = [p.proj.comm.indices for p in projs]
+        indptrs = [p.proj.comm.indptr for p in projs]
+        mats = [bp.connect.csr2coo((indices[i], indptrs[i])) for i in range(4)]
+
+        assert len(mats[2][0]) == len(weights[2])
+
+        Ne = np.prod(self.E.size)
+        Ni = np.prod(self.I.size)
+
+        w_E2E = np.bincount(mats[0][1], weights=weights[0], minlength=Ne)
+        w_E2I = np.bincount(mats[1][1], weights=weights[1], minlength=Ni)
+        w_I2E = np.bincount(mats[2][1], weights=weights[2], minlength=Ne)
+        w_I2I = np.bincount(mats[3][1], weights=weights[3], minlength=Ni)
+
+        IE_e = np.mean(w_I2E) / np.mean(w_E2E)
+        IE_i = np.mean(w_I2I) / np.mean(w_E2I)
+        return IE_e, IE_i
+
+    def expected_effective_zeta(self):
+        """
+        Calculate the effective IE ratio for inhibitory and excitatory populations.
+        The ratio represents total inhibitory strength divided by
+        total excitatory strength (for the average neuron) per neuron type.
+        """
+        # * An approximation to the distance kernel that is not valid with periodic
+        # * boundaries when the kernel is too wide
+        zeta_eff_e = (
+            self.zeta
+            * (self.sigma_ie**2 * self.p_ie)
+            / (self.gamma * self.sigma_ee**2 * self.p_ee)
+        )
+
+        zeta_eff_i = (
+            self.zeta
+            * (self.sigma_ii**2 * self.p_ii)
+            / (self.gamma * self.sigma_ei**2 * self.p_ei)
+        )
+
+        return zeta_eff_e, zeta_eff_i
+
     def copy(self):
         _params = self.get_input_params()
         new_model = self.__class__(copy_conn=self, **_params)
@@ -945,11 +995,11 @@ class FNScircuit(bp.Network):
 
             return run
 
-        run = copy_run(self, duration=1000.0, monitors=["E.spike"])
+        run = copy_run(self, duration=duration, monitors=monitors)
         res = bp.running.jax_vectorize_map(
             run, [zetas], num_parallel=num_parallel, clear_buffer=False
         )
-        res
+        return res
 
     def to_dict(
         self,

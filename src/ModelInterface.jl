@@ -3,7 +3,7 @@ using TimeseriesTools
 using DimensionalData
 using IntervalSets
 using Unitful
-export bprun, bpsolve, Neuron, Population
+export bprun, bpsolve, bpsweep, Neuron, Population
 
 DimensionalData.@dim Neuron ToolsDim
 DimensionalData.@dim Population ToolsDim
@@ -17,16 +17,11 @@ end
 function bpsolve(net::Py, time::Quantity; kwargs...)
     bpsolve(net, ustrip(uconvert(u"ms", time)); kwargs...)
 end
-function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
-                 transient = 500u"ms",
-                 inputs = nothing,
-                 kwargs...)
-    ps = collect(Iterators.product(populations, vars))[:]
-    monitors = ["$p.$v" for (p, v) in ps] |> Tuple
-    if !isnothing(inputs)
-        inputs = models.format_input(inputs)
-    end
-    runner = bprun(net, time; monitors, inputs, kwargs...)
+
+"""
+Extract the monitored variables as julia arrays
+"""
+function bpformat(runner; populations, vars, transient)
     t = runner.mon["ts"].view() |> convert2(Vector)
     dt = brainpy.share["dt"] |> convert2(Float64)
     lastt = last(t) |> convert2(Float64)
@@ -35,6 +30,8 @@ function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
     @assert last(t) ≈ lastt
     t = t .* u"ms" # Add time units
     t = t .+ step(t) |> 𝑡 # Correct for python starting at 0
+    ps = Iterators.product(populations, vars)
+    monitors = popvars2monitors(populations, vars)
     _X = [runner.mon[m].view() |> convert2(PyArray) for m in monitors]
     X = map(_X, ps) do x, (p, v)
         vs = Symbol.(["$p"] .* string.(1:size(x, 2)))
@@ -42,5 +39,69 @@ function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
     end
     X = reshape(X, length(populations), length(vars))
     X = ToolsArray(X, (Population(populations), Var(vars)))
+end
+
+function popvars2monitors(populations, vars)
+    ps = collect(Iterators.product(populations, vars))[:]
+    monitors = ["$p.$v" for (p, v) in ps] |> Tuple
+    return monitors
+end
+function monitors2popvars(monitors)
+    ps = split.(monitors, ".")
+    ps = [(Symbol(p[1]), Symbol(p[2])) for p in ps]
+    populations = first.(ps) |> unique |> collect
+    vars = last.(ps) |> unique |> collect
+    return return populations, vars
+end
+function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
+                 transient = 500u"ms",
+                 inputs = nothing,
+                 kwargs...)
+    monitors = popvars2monitors(populations, vars)
+    if !isnothing(inputs)
+        inputs = models.format_input(inputs)
+    end
+    runner = bprun(net, time; monitors, inputs, kwargs...)
+    return bpformat(runner; populations, vars, transient)
+end
+
+function bpformat(res, param::Symbol, vals; dt, transient, monitors)
+    # ? res has first dim == 'monitors'. Each element has shape (zeta, ts, neurons)
+    populations, vars = monitors2popvars(monitors)
+    nt = res[0][0].shape[0] |> convert2(Int)
+    t = range(start = dt, step = dt, length = nt) .* u"ms"
+
+    _X = [m |> convert2(PyArray) for m in res]
+    X = map(_X, monitors) do x, m
+        p = first(split(m, "."))
+        vs = Symbol.(["$p"] .* string.(1:size(x)[end]))
+        x = ToolsArray(x, (Dim{param}(vals), 𝑡(t), Neuron(vs)))
+        return x[𝑡(OpenInterval(transient,
+                                Inf * u"s"))]
+    end
+    X = map(Iterators.product(populations, vars)) do (p, v) # Get the monitors in the right order
+        return X[monitors .== ["$p.$v"]] |> only
+    end
+    X = reshape(X, length(populations), length(vars))
+    return ToolsArray(X, (Population(populations), Var(vars))) |> stack
+end
+function _bpsweep(model, param::Val{:zeta}, vals;
+                  duration,
+                  transient,
+                  populations = [:E, :I],
+                  vars = [:V],
+                  num_parallel = 10)
+    monitors = popvars2monitors(populations, vars)
+    duration = uconvert(u"ms", duration) |> ustrip
+    dt = brainpy.share["dt"] |> convert2(Float64)
+    res = model.sweep_zetas(jax.numpy.array(vals);
+                            duration,
+                            monitors,
+                            num_parallel)
+    param = typeof(param).parameters |> only
+    X = bpformat(res, param, vals; dt, transient, monitors)
     return X
+end
+function bpsweep(model, param::Symbol, vals; kwargs...)
+    _bpsweep(model, Val(param), vals; kwargs...)
 end

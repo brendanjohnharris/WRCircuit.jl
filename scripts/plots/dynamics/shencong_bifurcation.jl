@@ -15,18 +15,19 @@ begin
     model = models.FNScircuit
     modelname = "FNScircuit"
 
-    begin # Dewdrop parameters
-        dx = 0.5 # mm
-        rho = 30000
-        sigma_ee = 0.125,  # Width of the distance-dependent connectivity kernel (mm)
-        sigma_ei = 0.1,
-        sigma_ie = 0.1,
-        sigma_ii = 0.125,
-        p_ee = 0.1,  # Maximum connection probability (Campagnola2022, corrected)
-        p_ei = 0.2,
-        p_ie = 0.3,
-        p_ii = 0.3,
-        kernel = models.FNS.GaussianKernel
+    begin # Shencong Parameters
+        delta = 0.007 # Grid spacing
+        dx = 65 * delta # Originally 64*delta # 64 x 64 integer grid, 7um spacing
+        rho = 20000
+        p_ee = 0.2 #0.8 # These have been tweaked in order to match the mean sum of weights without explicitly setting between-population weight strengths
+        p_ei = 0.175 #0.7
+        p_ie = 0.1 #0.4
+        p_ii = 0.14 #0.57
+        sigma_ee = 7.5 * delta
+        sigma_ei = 9.5 * delta
+        sigma_ie = 19 * delta
+        sigma_ii = 19 * delta
+        kernel = models.FNS.ExponentialKernel
         J_e = 0.0008 # Microsiemens
         zeta = 3
         nu = 10

@@ -9,43 +9,36 @@ DrWatson.@quickactivate
 using Dewdrop
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
-
 begin
     model = models.FNScircuit
     modelname = "FNScircuit"
 
-    # Shencong Parameters
-    delta = 0.007
-    dx = 128 * delta # Originally 64*delta # 64 x 64 integer grid, 7um spacing
-    rho = 20000 # 12000
-    p_ee = 0.8
-    p_ei = 0.7
-    p_ie = 0.4
-    p_ii = 0.57
-    sigma_ee = 7.5 * delta
-    sigma_ei = 9.5 * delta
-    sigma_ie = 19 * delta
-    sigma_ii = 19 * delta
-    J_e = 0.0008 # Microsiemens. In spontaneous simulation code. Different from main paper
-    kernel = models.FNS.ExponentialKernel
+    begin # Shencong Parameters
+        delta = 0.007 # Grid spacing
+        dx = 65 * delta # Originally 64*delta # 64 x 64 integer grid, 7um spacing
+        rho = 20000
+        p_ee = 0.2 #0.8 # These have been tweaked in order to match the mean sum of weights without explicitly setting between-population weight strengths
+        p_ei = 0.175 #0.7
+        p_ie = 0.1 #0.4
+        p_ii = 0.14 #0.57
+        sigma_ee = 7.5 * delta
+        sigma_ei = 9.5 * delta
+        sigma_ie = 19 * delta
+        sigma_ii = 19 * delta
+        kernel = models.FNS.ExponentialKernel
+        J_e = 0.0008 # Microsiemens
+        zeta = 3
+        nu = 10
+        n_ext = 70 # 200
+    end
+    parameters = (; rho, dx, J_e, nu, n_ext, zeta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
+                  sigma_ei, sigma_ie, sigma_ii, kernel)
 end
 
 if !(@isdefined m) # * Simulate
-    # m = model(; rho = 30000, nu = 35, n_ext = 50, J_e = 0.001, zeta = 8,
-    #           key = jax.random.PRNGKey(42),
-    #           )
-    m = model(rho = rho, dx = dx, J_e = J_e,
-              nu = 2.5, n_ext = 25, zeta = 4,
-              p_ee = p_ee,
-              p_ei = p_ei,
-              p_ie = p_ie,
-              p_ii = p_ii,
-              sigma_ee = sigma_ee,
-              sigma_ei = sigma_ei,
-              sigma_ie = sigma_ie,
-              sigma_ii = sigma_ii,
-              kernel = kernel,
-              key = jax.random.PRNGKey(42))
+    m = model(; key = jax.random.PRNGKey(42),
+              kernel = models.FNS.ExponentialKernel,
+              parameters...)
 end
 begin
     # * check reinit is ok
