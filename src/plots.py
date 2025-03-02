@@ -171,7 +171,7 @@ def animate_spiking_activity(
         frames=num_frames,
         init_func=init,
         interval=interval,
-        blit=True,
+        blit=False,
     )
 
     # Close the figure to avoid displaying a static plot in some environments.
