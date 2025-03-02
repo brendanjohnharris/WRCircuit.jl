@@ -27,11 +27,11 @@ begin
         sigma_ii = 19 * delta
         kernel = models.FNS.ExponentialKernel
         J_e = 0.0008 # Microsiemens
-        zeta = 3
+        delta = 3
         nu = 10
         n_ext = 70 # 200
     end
-    parameters = (; rho, dx, J_e, nu, n_ext, zeta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
+    parameters = (; rho, dx, J_e, nu, n_ext, delta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
                   sigma_ei, sigma_ie, sigma_ii, kernel)
 end
 

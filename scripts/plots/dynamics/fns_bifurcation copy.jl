@@ -30,7 +30,7 @@ begin
         sigma_ii = 19 * delta
         kernel = models.FNS.ExponentialKernel
         J_e = 0.0008 # Microsiemens
-        zeta = 4
+        delta = 4
         nu = 10
         n_ext = 65 # 200
     end
@@ -40,7 +40,7 @@ begin
               J_e,
               nu,
               n_ext,
-              zeta,
+              delta,
               p_ee,
               p_ei,
               p_ie,
@@ -87,7 +87,7 @@ N = m.E.size |> convert2(Vector)
 domain = m.E.embedding.domain |> convert2(Vector)
 Δx = domain ./ N
 xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
-zetas = range(1, 50, length = 50)
+deltas = range(1, 50, length = 50)
 T = 10u"s"
 transient = 5000u"ms"
 
@@ -101,11 +101,11 @@ end
 begin
     # conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
 
-    out = pmap(zetas) do zeta # Maybe have to clear live arrays for each worker?
-        @info "ζ = $zeta"
+    out = pmap(deltas) do delta # Maybe have to clear live arrays for each worker?
+        @info "δ = $delta"
         m̂ = models.FNScircuit(rho = rho, dx = dx, J_e = J_e,
                                nu = 120, n_ext = 25,
-                               zeta = zeta,
+                               delta = delta,
                                p_ee = p_ee,
                                p_ei = p_ei,
                                p_ie = p_ie,
@@ -135,8 +135,8 @@ begin
         return χ, λ
     end
 end
-χ = ToolsArray(first.(out), (Dim{:zeta}(zetas),))
-λ = ToolsArray(last.(out), (Dim{:zeta}(zetas),))
+χ = ToolsArray(first.(out), (Dim{:delta}(deltas),))
+λ = ToolsArray(last.(out), (Dim{:delta}(deltas),))
 save("fns_bifurcation.jld2", (@strdict χ λ))
 
 # begin

@@ -66,7 +66,7 @@ function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
 end
 
 function bpformat(res, param::Symbol, vals; dt, transient, monitors)
-    # ? res has first dim == 'monitors'. Each element has shape (zeta, ts, neurons)
+    # ? res has first dim == 'monitors'. Each element has shape (delta, ts, neurons)
     populations, vars = monitors2popvars(monitors)
     nt = res[0][0].shape[0] |> convert2(Int)
     t = range(start = dt, step = dt, length = nt) .* u"ms"
@@ -85,7 +85,7 @@ function bpformat(res, param::Symbol, vals; dt, transient, monitors)
     X = reshape(X, length(populations), length(vars))
     return ToolsArray(X, (Population(populations), Var(vars))) |> stack
 end
-function _bpsweep(model, param::Val{:zeta}, vals;
+function _bpsweep(model, param::Val{:delta}, vals;
                   duration,
                   transient,
                   populations = [:E, :I],
@@ -94,10 +94,10 @@ function _bpsweep(model, param::Val{:zeta}, vals;
     monitors = popvars2monitors(populations, vars)
     duration = uconvert(u"ms", duration) |> ustrip
     dt = brainpy.share["dt"] |> convert2(Float64)
-    res = model.sweep_zetas(jax.numpy.array(vals);
-                            duration,
-                            monitors,
-                            num_parallel)
+    res = model.sweep_deltas(jax.numpy.array(vals);
+                             duration,
+                             monitors,
+                             num_parallel)
     param = typeof(param).parameters |> only
     X = bpformat(res, param, vals; dt, transient, monitors)
     return X

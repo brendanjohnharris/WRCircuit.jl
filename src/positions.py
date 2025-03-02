@@ -58,9 +58,10 @@ class RandomPositions(AbstractPositions):
             key = jax.random.PRNGKey(42)
         self.key = key
 
-    def __call__(self, shape):
+    def __call__(self, shape, sort=True):
         """
         Generates random (x, y, ...) positions within 'domain' for the given 'shape'.
+        Returns the positions in sorted order if sort=True
         Returns a JAX array of shape (N, D), where N = prod(shape) and D = len(domain).
         """
         shape = self.cast_to_tuple(shape)
@@ -78,6 +79,10 @@ class RandomPositions(AbstractPositions):
         # coords is a list of D arrays [ (N,), (N,), ... ]
         # Stack along axis=1 to get shape (N, D)
         coords = jnp.stack(coords, axis=1)
+
+        if sort:
+            # Sort the positions along the first dimension
+            coords = coords[jnp.lexsort((coords[:, 0], coords[:, 1]))]
 
         # Update this object's key to avoid reusing it
         self.key = key

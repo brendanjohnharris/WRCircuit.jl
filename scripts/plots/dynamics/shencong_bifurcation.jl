@@ -29,16 +29,16 @@ begin
         sigma_ii = 19 * delta
         kernel = models.FNS.ExponentialKernel
         J_e = 0.0008 # Microsiemens
-        zeta = 3
+        delta = 3
         nu = 10
         n_ext = 70 # 200
     end
 end
 begin
-    parameters = (; rho, dx, J_e, nu, n_ext, zeta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
+    parameters = (; rho, dx, J_e, nu, n_ext, delta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
                   sigma_ei, sigma_ie, sigma_ii, kernel)
 
-    zetas = range(1, 5, length = 20)
+    deltas = range(1, 5, length = 20)
     nus = range(5, 15, length = 3)
 
     T = 15u"s"
@@ -57,16 +57,16 @@ begin
         xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
 
         begin
-            res = bpsweep(m, :zeta, zetas;
+            res = bpsweep(m, :delta, deltas;
                           duration = T,
                           transient,
                           populations = [:E],
                           vars = [:spike],
-                          num_parallel = length(zetas))
+                          num_parallel = length(deltas))
             res = res[Population = At(:E), Var = At(:spike)]
         end
 
-        stats = progressmap(eachslice(res, dims = :zeta)) do spikes
+        stats = progressmap(eachslice(res, dims = :delta)) do spikes
             begin # * Susceptibility
                 dt = 10u"ms"
                 x = sum.(coarsegrain(spikes, dt)) # Bin over time
@@ -109,7 +109,7 @@ begin
         ax.xgridvisible = true
         ax.xticksvisible = true
     end
-    last(contents(f.layout)).xlabel = "ζ"
+    last(contents(f.layout)).xlabel = "δ"
     save("fns_bifurcation.pdf", f)
     f
 end

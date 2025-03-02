@@ -378,16 +378,21 @@ class GaussianKernel(AbstractKernel):
         sigma,
         p_max=1.0,
     ):
+        super().__init__()
         self.sigma = sigma
         self.p_max = p_max
 
-        # super(GaussianKernel, self).__init__(
-        #     domain=domain,
-        #     positions_pre=pre_positions,
-        #     positions_post=post_positions,
-        #     kernel=gaussian_kernel,
-        #     **kwargs,
-        # )
+    def mass2pmax(omega, sigma):
+        """
+        Convert the total integrated distribution to the height at the origin. Only for 2D.
+        """
+        return omega / (2 * np.pi * sigma**2)
+
+    def pmax2mass(p_max, sigma):
+        """
+        Convert the height at the origin to the total integrated distribution. Only for 2D.
+        """
+        return p_max * (2 * np.pi * sigma**2)
 
     def __call__(self, distance):
         return self.p_max * jnp.exp(-(distance**2) / (2 * self.sigma**2))
@@ -409,18 +414,9 @@ class ExponentialKernel(AbstractKernel):
     """
 
     def __init__(self, sigma, p_max=1.0):
+        super().__init__()
         self.sigma = sigma
         self.p_max = p_max
-
-        # might want to call the parent class's __init__ if necessary.
-        # For example:
-        # super(ExponentialKernel, self).__init__(
-        #     domain=domain,
-        #     positions_pre=pre_positions,
-        #     positions_post=post_positions,
-        #     kernel=exponential_kernel,
-        #     **kwargs,
-        # )
 
     def __call__(self, distance):
         """
@@ -437,6 +433,18 @@ class ExponentialKernel(AbstractKernel):
             The connection probability.
         """
         return self.p_max * jnp.exp(-distance / self.sigma)
+
+    def mass2pmax(omega, sigma):
+        """
+        Convert the total integrated distribution to the height at the origin. Only for 2D.
+        """
+        return omega / (2 * np.pi * sigma**2)
+
+    def pmax2mass(p_max, sigma):
+        """
+        Convert the height at the origin to the total integrated distribution. Only for 2D.
+        """
+        return p_max * (2 * np.pi * sigma**2)
 
     def to_dict(self):
         """
@@ -528,14 +536,14 @@ class FNScircuit(bp.Network):
         sigma_ei=0.1,
         sigma_ie=0.1,
         sigma_ii=0.125,
-        p_ee=0.1,  # Maximum connection probability (Campagnola2022, corrected)
-        p_ei=0.2,
-        p_ie=0.3,
-        p_ii=0.3,
+        omega_ee=0.1,  # Total 'mass' of connectivity probability (proportional to num. synapses)
+        omega_ei=0.2,
+        omega_ie=0.3,
+        omega_ii=0.3,
         boundary="periodic",
         include_self=False,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
-        zeta=4,  # Per-neuron synaptic weight I:E ratio
+        delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
         J_e=0.0008,  # ! Currently abitrary. Has same units as g_L? uS
@@ -552,19 +560,23 @@ class FNScircuit(bp.Network):
         self.sigma_ei = sigma_ei
         self.sigma_ie = sigma_ie
         self.sigma_ii = sigma_ii
-        self.p_ee = p_ee
-        self.p_ei = p_ei
-        self.p_ie = p_ie
-        self.p_ii = p_ii
+        self.omega_ee = omega_ee
+        self.omega_ei = omega_ei
+        self.omega_ie = omega_ie
+        self.omega_ii = omega_ii
+        self.p_ee = kernel.mass2pmax(omega_ee, sigma_ee)
+        self.p_ei = kernel.mass2pmax(omega_ei, sigma_ei)
+        self.p_ie = kernel.mass2pmax(omega_ie, sigma_ie)
+        self.p_ii = kernel.mass2pmax(omega_ii, sigma_ii)
         self.boundary = boundary
         self.include_self = include_self
         self.gamma = gamma
-        self.zeta = zeta
+        self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
         self.J_e = J_e
         self.J_i = (
-            self.J_e * zeta
+            self.J_e * delta
         )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
         self.kernel = kernel
@@ -645,7 +657,7 @@ class FNScircuit(bp.Network):
         else:
             self.key, subkey = jax.random.split(self.key)
             conn_ee = DistanceDependent(
-                kernel=kernel(sigma=sigma_ee, p_max=p_ee),
+                kernel=kernel(sigma=self.sigma_ee, p_max=self.p_ee),
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
                 positions_post=self.E.positions,
@@ -655,7 +667,7 @@ class FNScircuit(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ei = DistanceDependent(
-                kernel=kernel(sigma=sigma_ei, p_max=p_ei),
+                kernel=kernel(sigma=self.sigma_ei, p_max=self.p_ei),
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
                 positions_post=self.I.positions,
@@ -665,7 +677,7 @@ class FNScircuit(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ie = DistanceDependent(
-                kernel=kernel(sigma=sigma_ie, p_max=p_ie),
+                kernel=kernel(sigma=self.sigma_ie, p_max=self.p_ie),
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
                 positions_post=self.E.positions,
@@ -675,7 +687,7 @@ class FNScircuit(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ii = DistanceDependent(
-                kernel=kernel(sigma=sigma_ii, p_max=p_ii),
+                kernel=kernel(sigma=self.sigma_ii, p_max=self.p_ii),
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
                 positions_post=self.I.positions,
@@ -779,14 +791,14 @@ class FNScircuit(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.zeta, self.J_e)  # !! Need to fix it seems
+        self.reinit_weights(self.delta, self.J_e)  # !! Need to fix it seems
 
-    def reinit_weights(self, zeta=None, J_e=None):
-        if zeta is not None:
-            self.zeta = zeta
+    def reinit_weights(self, delta=None, J_e=None):
+        if delta is not None:
+            self.delta = delta
         if J_e is not None:
             self.J_e = J_e
-        self.J_i = self.J_e * self.zeta
+        self.J_i = self.J_e * self.delta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(self.E2E.proj, self.J_e, subkey)
         self.key, subkey = jax.random.split(self.key)
@@ -854,7 +866,7 @@ class FNScircuit(bp.Network):
             "boundary",
             "include_self",
             "gamma",
-            "zeta",
+            "delta",
             "nu",
             "n_ext",
             "J_e",
@@ -915,7 +927,7 @@ class FNScircuit(bp.Network):
 
         return rho * result
 
-    def effective_zeta(self):
+    def calculate_zeta(self):
         """
         Calculate the effective IE ratio for inhibitory and excitatory populations.
         The ratio represents total inhibitory strength divided by
@@ -942,7 +954,7 @@ class FNScircuit(bp.Network):
         IE_i = np.mean(w_I2I) / np.mean(w_E2I)
         return IE_e, IE_i
 
-    def expected_effective_zeta(self):
+    def expected_zeta(self):
         """
         Calculate the effective IE ratio for inhibitory and excitatory populations.
         The ratio represents total inhibitory strength divided by
@@ -950,19 +962,19 @@ class FNScircuit(bp.Network):
         """
         # * An approximation to the distance kernel that is not valid with periodic
         # * boundaries when the kernel is too wide
-        zeta_eff_e = (
-            self.zeta
+        zeta_e = (
+            self.delta
             * (self.sigma_ie**2 * self.p_ie)
             / (self.gamma * self.sigma_ee**2 * self.p_ee)
         )
 
-        zeta_eff_i = (
-            self.zeta
+        zeta_i = (
+            self.delta
             * (self.sigma_ii**2 * self.p_ii)
             / (self.gamma * self.sigma_ei**2 * self.p_ei)
         )
 
-        return zeta_eff_e, zeta_eff_i
+        return zeta_e, zeta_i
 
     def copy(self):
         _params = self.get_input_params()
@@ -974,18 +986,18 @@ class FNScircuit(bp.Network):
         _params = self.get_input_params()
         params = {**_params, **params}
         new_model = self.__class__(copy_conn=self, **params)
-        new_model.reinit_weights(params["zeta"], params["J_e"])
+        new_model.reinit_weights(params["delta"], params["J_e"])
         new_model.reinit_nu(params["nu"])
         bp.reset_state(new_model)
         return new_model
 
-    def sweep_zetas(
-        self, zetas, duration=1000.0, monitors=["E.spike"], num_parallel=20
+    def sweep_deltas(
+        self, deltas, duration=1000.0, monitors=["E.spike"], num_parallel=20
     ):
         def copy_run(self, duration=1000.0, monitors=["E.spike"]):
-            def run(zeta):
+            def run(delta):
                 new_model = self.copy()
-                new_model.reinit_weights(zeta)
+                new_model.reinit_weights(delta)
                 bp.reset_state(new_model)
                 runner = bp.DSRunner(
                     new_model, monitors=monitors, numpy_mon_after_run=False
@@ -997,7 +1009,7 @@ class FNScircuit(bp.Network):
 
         run = copy_run(self, duration=duration, monitors=monitors)
         res = bp.running.jax_vectorize_map(
-            run, [zetas], num_parallel=num_parallel, clear_buffer=False
+            run, [deltas], num_parallel=num_parallel, clear_buffer=False
         )
         return res
 
@@ -1010,6 +1022,10 @@ class FNScircuit(bp.Network):
             "sigma_ei",
             "sigma_ie",
             "sigma_ii",
+            "omega_ee",
+            "omega_ei",
+            "omega_ie",
+            "omega_ii",
             "p_ee",
             "p_ei",
             "p_ie",
