@@ -11,6 +11,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax import lax
 import copy
+import os
 from scipy.integrate import dblquad
 
 import brainpy as bp
@@ -35,6 +36,21 @@ from functools import partial
 from ..neurons import FNSNeuron
 from ..positions import *
 from ..synapses import *
+
+
+def pytree_to_numpy(pytree):
+    """
+    Recursively traverse `pytree`, converting JAX arrays (jnp.ndarray)
+    to NumPy arrays (np.ndarray).
+    """
+
+    def convert_if_jax_array(x):
+        if isinstance(x, jnp.ndarray):
+            return np.asarray(x)
+        else:
+            return x
+
+    return jax.tree_map(convert_if_jax_array, pytree)
 
 
 def format_input(inputs):
@@ -221,6 +237,7 @@ class DistanceDependent(TwoEndConnector):
     #         diag_indices = (jnp.arange(min_neurons), jnp.arange(min_neurons))
     #         conn_mat = conn_mat.at[diag_indices].set(False)
     #     return conn_mat
+
     def build_csr(self):
         # -------------------------------------------------------------------------
         # Helper: Compute distance with different boundary adjustments.
@@ -453,22 +470,30 @@ class ExponentialKernel(AbstractKernel):
         return {"sigma": self.sigma, "p_max": self.p_max}
 
 
-def indegrees(proj):  # ! NOT JAX COMPATIBLE???
-    N = jnp.prod(jnp.array(proj.post.size))
-    indices = jnp.array(proj.comm.indices, dtype=int)
-    in_degree = jnp.bincount(indices, length=N)
-    return in_degree
+# Wrapper that extracts the parameters from the proj object
+def indegrees(proj):  # Not jax-compatible
+    _bincount = jax.jit(jnp.bincount, static_argnames=["length"])
+    post_size = proj.post.size  # Should be a tuple of ints
+    N = int(jnp.prod(jnp.array(post_size)))
+    indices = jnp.asarray(proj.comm.indices, dtype=jnp.int32)
+    return _bincount(indices, length=N)
+
+
+def indegrees_static(indices, N):  # Jax-compatible if N is static
+    _bincount = jax.jit(jnp.bincount, static_argnames=["length"])
+    indices = jnp.asarray(indices, dtype=jnp.int32)
+    return _bincount(indices, length=np.prod(N))
 
 
 def indegree(proj):
-    N = jnp.prod(jnp.array(proj.post.size))
+    N = int(jnp.prod(jnp.array(proj.post.size)))
     indices = jnp.array(proj.comm.indices, dtype=int)
     in_degree = jnp.bincount(indices, length=N)
     return jnp.mean(in_degree)
 
 
-def correlate_weights(proj, J, key):
-    k = indegrees(proj)
+def correlate_weights(proj, J, N, key):
+    k = indegrees_static(proj.comm.indices, N)
 
     nonzero_mask = k > 0
     k_nonzero = jnp.where(nonzero_mask, k, 0)
@@ -596,7 +621,7 @@ class FNScircuit(bp.Network):
         # neurons
         self.key, subkey = jax.random.split(self.key)
         self.E = FNSNeuron(
-            size=(ne, ne),
+            size=[ne, ne],
             C=0.25,
             g_L=0.0167,
             V_L=-70.0,
@@ -642,17 +667,21 @@ class FNScircuit(bp.Network):
             # else:
             indices = copy.deepcopy(proj["indices"])
             inptr = copy.deepcopy(proj["indptr"])
+
             return CSRConn(indices, inptr)
 
         if copy_conn:
             if isinstance(copy_conn, FNScircuit):
                 copy_conn = copy_conn.get_connectivity()
+
             conn_ee = copy_connectivity(copy_conn["E2E"])
             conn_ei = copy_connectivity(copy_conn["E2I"])
             conn_ie = copy_connectivity(copy_conn["I2E"])
             conn_ii = copy_connectivity(copy_conn["I2I"])
             conn_exte = copy_connectivity(copy_conn["ext2E"])
             conn_exti = copy_connectivity(copy_conn["ext2I"])
+            self.N_e = copy_conn["N_e"]
+            self.N_i = copy_conn["N_i"]
 
         else:
             self.key, subkey = jax.random.split(self.key)
@@ -705,9 +734,12 @@ class FNScircuit(bp.Network):
                 prob=p_ext, allow_multi_conn=True, seed=subkey
             )
 
+            self.N_e = self.E.size
+            self.N_i = self.I.size
+
         # Synapses
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5
+        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
@@ -718,10 +750,11 @@ class FNScircuit(bp.Network):
             conn=conn_ee,
             tau_d=tau_d_e,
             tau_r=1.0,
-            g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
+            g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
@@ -729,7 +762,7 @@ class FNScircuit(bp.Network):
             conn=conn_ei,
             tau_d=tau_d_e,
             tau_r=1.0,
-            g_max=bp.init.Normal(self.J_e, self.J_e * 0.05),
+            g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
@@ -740,7 +773,7 @@ class FNScircuit(bp.Network):
             conn=conn_ie,
             tau_d=tau_d_i,
             tau_r=1.0,
-            g_max=bp.init.Normal(self.J_i, self.J_i * 0.05),
+            g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
@@ -751,7 +784,7 @@ class FNScircuit(bp.Network):
             conn=conn_ii,
             tau_d=tau_d_i,
             tau_r=1.0,
-            g_max=bp.init.Normal(self.J_i, self.J_i * 0.05),
+            g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
@@ -800,20 +833,31 @@ class FNScircuit(bp.Network):
             self.J_e = J_e
         self.J_i = self.J_e * self.delta
         self.key, subkey = jax.random.split(self.key)
-        self.E2E.proj.comm.weight = correlate_weights(self.E2E.proj, self.J_e, subkey)
+        self.E2E.proj.comm.weight = correlate_weights(
+            self.E2E.proj,
+            self.J_e,
+            self.N_e,
+            subkey,  # ? Need to pass N_ee to keep this function jittable.
+        )
         self.key, subkey = jax.random.split(self.key)
-        self.E2I.proj.comm.weight = correlate_weights(self.E2I.proj, self.J_e, subkey)
+        self.E2I.proj.comm.weight = correlate_weights(
+            self.E2I.proj, self.J_e, self.N_i, subkey
+        )
         self.key, subkey = jax.random.split(self.key)
-        self.I2E.proj.comm.weight = correlate_weights(self.I2E.proj, self.J_i, subkey)
+        self.I2E.proj.comm.weight = correlate_weights(
+            self.I2E.proj, self.J_i, self.N_e, subkey
+        )
         self.key, subkey = jax.random.split(self.key)
-        self.I2I.proj.comm.weight = correlate_weights(self.I2I.proj, self.J_i, subkey)
+        self.I2I.proj.comm.weight = correlate_weights(
+            self.I2I.proj, self.J_i, self.N_i, subkey
+        )
         self.key, subkey = jax.random.split(self.key)
         self.ext2E.proj.comm.weight = correlate_weights(
-            self.ext2E.proj, self.J_e, subkey
+            self.ext2E.proj, self.J_e, self.N_e, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.ext2I.proj.comm.weight = correlate_weights(
-            self.ext2I.proj, self.J_e, subkey
+            self.ext2I.proj, self.J_e, self.N_i, subkey
         )
         self.reset_state()  ## or bp.reset_state(self)??
 
@@ -849,6 +893,8 @@ class FNScircuit(bp.Network):
                 "indices": self.ext2I.proj.comm.indices,
                 "indptr": self.ext2I.proj.comm.indptr,
             },
+            "N_e": self.N_e,
+            "N_i": self.N_i,
         }
 
     def get_input_params(self):
@@ -859,10 +905,6 @@ class FNScircuit(bp.Network):
             "sigma_ei",
             "sigma_ie",
             "sigma_ii",
-            "p_ee",
-            "p_ei",
-            "p_ie",
-            "p_ii",
             "boundary",
             "include_self",
             "gamma",
@@ -994,23 +1036,47 @@ class FNScircuit(bp.Network):
     def sweep_deltas(
         self, deltas, duration=1000.0, monitors=["E.spike"], num_parallel=20
     ):
-        def copy_run(self, duration=1000.0, monitors=["E.spike"]):
+
+        def copy_run(
+            self, duration=1000.0, monitors=["E.spike"], key=42, concrete_out=False
+        ):
+            conn = self.get_connectivity()
+            conn = pytree_to_numpy(conn)  # Freeze connectivity
+            params = self.get_input_params()
+            params["key"] = key
+
             def run(delta):
-                new_model = self.copy()
+                new_model = self.__class__(copy_conn=conn, **params)
                 new_model.reinit_weights(delta)
                 bp.reset_state(new_model)
                 runner = bp.DSRunner(
-                    new_model, monitors=monitors, numpy_mon_after_run=False
+                    new_model, monitors=monitors, numpy_mon_after_run=concrete_out
                 )
                 runner.run(duration=duration)
                 return [runner.mon[m] for m in monitors]
 
             return run
 
-        run = copy_run(self, duration=duration, monitors=monitors)
-        res = bp.running.jax_vectorize_map(
-            run, [deltas], num_parallel=num_parallel, clear_buffer=False
-        )
+        key = np.array(self.key)
+        print(key)
+        # If gpu available, use vmap
+        if jax.lib.xla_bridge.get_backend().platform == "gpu":
+            run = copy_run(
+                self, duration=duration, monitors=monitors, concrete_out=False, key=key
+            )
+            print("Vectorizing on GPU")
+            res = bp.running.jax_vectorize_map(
+                run, [deltas], num_parallel=num_parallel, clear_buffer=False
+            )
+        else:
+            run = copy_run(
+                self, duration=duration, monitors=monitors, concrete_out=False, key=key
+            )
+            print("Parallelizing on CPU")
+            # Make sure to set bp.math.set_host_device_count(os.cpu_count()) in the calling script
+            res = bp.running.jax_parallelize_map(
+                run, [deltas], num_parallel=num_parallel, clear_buffer=False
+            )
         return res
 
     def to_dict(

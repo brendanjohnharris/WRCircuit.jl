@@ -105,3 +105,23 @@ end
 function bpsweep(model, param::Symbol, vals; kwargs...)
     _bpsweep(model, Val(param), vals; kwargs...)
 end
+function bpsweep(model, param::Pair; kwargs...)
+    _bpsweep(model, Val(first(param)), last(param); kwargs...)
+end
+
+function bpsweep(model_class, conn::Py, params::Dict, param::Pair; batch_size,
+                 batch_seed = 42,
+                 kwargs...)
+    vals = last(param)
+    param = first(param)
+    # * Subset the vals into batches of size batch
+    batch_vals = Iterators.partition(vals, batch_size)
+    X = map(batch_vals) do bvals
+        clear_live_arrays()
+        model = model_class(; params..., copy_conn = conn,
+                            key = jax.random.PRNGKey(batch_seed)) # Fast construction
+        _bpsweep(model, Val(param), bvals; kwargs...)
+    end
+    pcat(x, y) = cat(x, y, dims = param)
+    return reduce(pcat, X)
+end

@@ -17,51 +17,60 @@ begin
 
     begin # Dewdrop parameters
         dx = 0.5 # mm
-        rho = 30000
-        sigma_ee = 0.125,  # Width of the distance-dependent connectivity kernel (mm)
-        sigma_ei = 0.1,
-        sigma_ie = 0.1,
-        sigma_ii = 0.125,
-        p_ee = 0.1,  # Maximum connection probability (Campagnola2022, corrected)
-        p_ei = 0.2,
-        p_ie = 0.3,
-        p_ii = 0.3,
+        rho = 30000.0
         kernel = models.FNS.GaussianKernel
         J_e = 0.0008 # Microsiemens
-        delta = 3
-        nu = 10
-        n_ext = 70 # 200
+        delta = 2.0 # 2.9
+        nu = 10.0 # Preserve; the minimum required for spontaneous spiking
+        n_ext = 65 # Should be around 10% of total number of inputs??
+
+        sigma_ee = 0.075
+        sigma_ei = 0.1
+        sigma_ie = 0.2
+        sigma_ii = 0.2
+
+        omega_ee = 0.0038
+        omega_ie = 0.025
+
+        omega_ei = 0.006 # The relative strength of these two components controls intensity/sparseness of pattern?
+        omega_ii = 0.0275
     end
 end
 begin
-    parameters = (; rho, dx, J_e, nu, n_ext, delta, p_ee, p_ei, p_ie, p_ii, sigma_ee,
-                  sigma_ei, sigma_ie, sigma_ii, kernel)
+    parameters = (; rho, dx, J_e, nu, n_ext, delta, omega_ee, omega_ei, omega_ie, omega_ii,
+                  sigma_ee, sigma_ei, sigma_ie, sigma_ii, kernel)
 
-    deltas = range(1, 5, length = 20)
-    nus = range(5, 15, length = 3)
+    deltas = range(2, 5, length = 30)
+    nus = range(10, 10, length = 1)
 
-    T = 15u"s"
+    T = 10u"s"
     transient = 5u"s"
 end
 begin
     stats = map(nus) do nu
         @info "Simulating for nu = $nu"
         Dewdrop.clear_live_arrays()
-        m = model(; key = jax.random.PRNGKey(42),
-                  parameters..., nu)
-        brainpy.reset_state(m)
-        N = m.E.size |> convert2(Vector)
-        domain = m.E.embedding.domain |> convert2(Vector)
-        Δx = domain ./ N
-        xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
-
         begin
-            res = bpsweep(m, :delta, deltas;
+            m = model(; parameters..., nu, key = jax.random.PRNGKey(42)) # Build once to get connectivity
+
+            N = m.E.size |> convert2(Vector)
+            domain = m.E.embedding.domain |> convert2(Vector)
+            Δx = domain ./ N
+            xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
+
+            conn = m.get_connectivity()
+            conn = models.FNS.pytree_to_numpy(conn) # Freeze the connectivity
+            _params = m.get_input_params() |> convert2(Dict{Symbol, Any})
+            model_class = m.__class__
+
+            res = bpsweep(model_class, conn, _params, :delta => deltas;
                           duration = T,
                           transient,
                           populations = [:E],
                           vars = [:spike],
-                          num_parallel = length(deltas))
+                          num_parallel = 10,
+                          batch_size = 10,
+                          batch_seed = 42)
             res = res[Population = At(:E), Var = At(:spike)]
         end
 
@@ -92,7 +101,7 @@ begin
 end
 begin
     f = Figure(size = (800, 600))
-    colorrange = extrema(lookup(stats, :nu))
+    colorrange = extrema(lookup(stats, :nu)) .+ [0, 0.001]
     map(enumerate(eachslice(ustripall(stats), dims = :statistic))) do (i, stat)
         statname = refdims(stat) |> only |> only
         ax = Axis(f[i, 1]; ylabel = "$statname")
