@@ -149,6 +149,7 @@ class Synapse(bp.Projection):
         # scaled_g_max = ScaledInitializer(  # Only for dual exponential synapse
         #     initializer=g_max, scale_factor=1.0 / (tau_d - tau_r)
         # )
+        # A = 1/ (tau_d - tau_r)  # Setting A to this scales the integral of the conductance change to g_max. The default A means g_max is the peak conductance change.
         self.proj = bp.dyn.FullProjAlignPreSDMg(
             pre=pre,
             delay=self.delay,
@@ -159,8 +160,11 @@ class Synapse(bp.Projection):
             # ),
             # !!! YIFAN USES AMPA SYNAPSE, SHENCONG USES DUAL EXPONENTIAL SYNAPSE. MF!
             syn=bp.dyn.DualExponV2.desc(
-                pre.num, tau_decay=tau_d, tau_rise=tau_r
-            ),  # Has a maximum response of 1
+                pre.num,
+                tau_decay=tau_d,
+                tau_rise=tau_r,
+            ),
+            # A=A),
             comm=bp.dnn.CSRLinear(
                 conn=conn(pre.size, post.size),
                 # weight=1.0,

@@ -18,7 +18,7 @@ def animate_spiking_activity(
 
     Parameters
     ----------
-    FNSnet : FNSCircuit
+    FNSnet : Dewdrop
         The neural network model.
     runner : brainpy.DSRunner
         The simulation runner that has run the simulation and contains spiking data.

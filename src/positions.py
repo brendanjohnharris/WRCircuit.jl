@@ -93,22 +93,38 @@ class RandomPositions(AbstractPositions):
 
 
 class ClusteredPositions(AbstractPositions):
-    def __init__(self, center, radius):
+    def __init__(self, center, radius, key=None):
         self.center = self.cast_to_tuple(center)
         self.radius = radius
+        if key is None:
+            key = jax.random.PRNGKey(42)
+        self.key = key
 
     def __call__(self, shape):
         shape = self.cast_to_tuple(shape)
-        total_positions = np.prod(shape)
-        # Generate random angles uniformly between 0 and 2π
-        theta = np.random.uniform(0, 2 * np.pi, total_positions)
-        # Generate random radii with uniform distribution over disc area
-        r = self.radius * np.sqrt(np.random.uniform(0, 1, total_positions))
+        total_positions = int(np.prod(shape))
+        key = self.key
+
+        # Generate random angles uniformly between 0 and 2π using JAX
+        key, subkey_theta = jax.random.split(key)
+        theta = jax.random.uniform(subkey_theta, shape=(total_positions,),
+                                   minval=0.0, maxval=2 * np.pi)
+
+        # Generate random radii with uniform distribution over disc area using JAX
+        key, subkey_r = jax.random.split(key)
+        r = self.radius * jnp.sqrt(jax.random.uniform(subkey_r, shape=(total_positions,),
+                                                       minval=0.0, maxval=1.0))
         # Convert polar coordinates to Cartesian coordinates
-        x = self.center[0] + r * np.cos(theta)
-        y = self.center[1] + r * np.sin(theta)
-        positions = self.cast_to_tuple(list(zip(x, y)))
-        return positions
+        x = self.center[0] + r * jnp.cos(theta)
+        y = self.center[1] + r * jnp.sin(theta)
+
+        # Convert the JAX arrays to a Python tuple of positions.
+        positions = list(zip(x.tolist(), y.tolist()))
+
+        # Update the key to avoid reusing it
+        self.key = key
+
+        return self.cast_to_tuple(positions)
 
     def to_dict(self):
         return {"center": self.center, "radius": self.radius}

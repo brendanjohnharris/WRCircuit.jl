@@ -14,8 +14,8 @@ Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.FNScircuit
-    modelname = "FNScircuit"
+    model = models.Dewdrop
+    modelname = "Dewdrop"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -29,7 +29,7 @@ begin
         sigma_ei = 9.5 * delta
         sigma_ie = 19 * delta
         sigma_ii = 19 * delta
-        kernel = models.FNS.ExponentialKernel
+        kernel = distances.ExponentialKernel
         J_e = 0.0008 # Microsiemens
         delta = 2.5
         nu = 10
@@ -53,7 +53,7 @@ begin
                   sigma_ie,
                   sigma_ii)
     m = model(; key = jax.random.PRNGKey(42),
-              kernel = models.FNS.ExponentialKernel,
+              kernel = distances.ExponentialKernel,
               parameters...)
     XX = bpsolve(m, 2000u"ms"; populations = [:E], vars = [:spike])
 
@@ -112,11 +112,11 @@ begin
     conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
     out = pmap(deltas) do delta
         @info "δ = $delta"
-        m̂ = models.FNScircuit(; key = jax.random.PRNGKey(42),
-                               kernel = models.FNS.ExponentialKernel,
-                               parameters...,
-                               delta,
-                               copy_conn = conn)
+        m̂ = models.Dewdrop(; key = jax.random.PRNGKey(42),
+                            kernel = distances.ExponentialKernel,
+                            parameters...,
+                            delta,
+                            copy_conn = conn)
         res = bpsolve(m̂, T; populations = [:E], vars = [:spike], transient)
         N = m̂.E.size |> convert2(Vector)
         spikes = res[Var = At(:spike)][Population = At(:E)]

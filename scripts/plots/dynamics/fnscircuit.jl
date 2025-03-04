@@ -10,8 +10,8 @@ using Dewdrop
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 begin
-    model = models.FNScircuit
-    modelname = "FNScircuit"
+    model = models.Dewdrop
+    modelname = "Dewdrop"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -25,7 +25,7 @@ begin
         sigma_ei = 9.5 * delta
         sigma_ie = 19 * delta
         sigma_ii = 19 * delta
-        kernel = models.FNS.ExponentialKernel
+        kernel = distances.ExponentialKernel
         J_e = 0.0008 # Microsiemens
         delta = 3
         nu = 10
@@ -37,7 +37,7 @@ end
 
 if !(@isdefined m) # * Simulate
     m = model(; key = jax.random.PRNGKey(42),
-              kernel = models.FNS.ExponentialKernel,
+              kernel = distances.ExponentialKernel,
               parameters...)
 end
 begin

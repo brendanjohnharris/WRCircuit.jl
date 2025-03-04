@@ -2,7 +2,7 @@ if __name__ == "__main__":
     plt.style.use("foresight.mplstyle")
     num_exc_neurons = (100, 100)
     num_inh_neurons = 100
-    FNSnet = FNSCircuit(num_exc_neurons, num_inh_neurons)
+    FNSnet = Dewdrop(num_exc_neurons, num_inh_neurons)
 
     input, T = bp.inputs.section_input([0.0, 400.0], [100.0, 100.0], return_length=True)
     inputs = np.zeros(FNSnet.E.size + (len(input),))

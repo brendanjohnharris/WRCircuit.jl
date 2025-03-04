@@ -1,7 +1,6 @@
 import brainpy as bp
 import brainpy.math as bm
 from brainpy.connect import TwoEndConnector
-
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
@@ -38,89 +37,53 @@ from ..positions import *
 from ..synapses import *
 
 
-class SingleNeuron(bp.Network):
-    def __init__(self, FNSnet, pop="E", n_ext=10):
-        super().__init_()
-        if pop == "E":
-            neuron = FNSnet.E.__class__
-            neuron = neuron(
-                size=FNSnet.E.size,
-                C=FNSnet.E.C,
-                g_L=FNSnet.E.g_L,
-                V_L=FNSnet.E.V_L,
-                V_th=FNSnet.E.V_th,
-                V_rt=FNSnet.E.V_rt,
-                tau_ref=FNSnet.E.tau_ref,
-                V_K=FNSnet.E.V_K,
-                tau_K=FNSnet.E.tau_K,
-                Delta_g_K=FNSnet.E.Delta_g_K,
-                V_initializer=FNSnet.E.V_rt,
-                method=FNSnet.E.method,
-                embedding=None,
-            )
-        elif pop == "I":
-            neuron = FNSnet.I.__class__
-            neuron = neuron(
-                size=FNSnet.I.size,
-                C=FNSnet.I.C,
-                g_L=FNSnet.I.g_L,
-                V_L=FNSnet.I.V_L,
-                V_th=FNSnet.I.V_th,
-                V_rt=FNSnet.I.V_rt,
-                tau_ref=FNSnet.I.tau_ref,
-                V_K=FNSnet.I.V_K,
-                tau_K=FNSnet.I.tau_K,
-                Delta_g_K=FNSnet.I.Delta_g_K,
-                V_initializer=FNSnet.I.V_rt,
-                method=FNSnet.I.method,
-                embedding=None,
-            )
-        self.ext = bp.dyn.PoissonGroup(
-            size=n_ext,
-            freqs=FNSnet.nu,
-            keep_size=False,
-            sharding=None,
-            spk_type=None,
-            name=None,
-            mode=None,
-        )
-        self.ext2neuron = Synapse(
-            pre=FNSnet.ext,
-            post=FNSnet.E,
-            conn=bp.connect.All2All(include_FNSnet=True),
-            delay=2.0,
-            tau_d=FNSnet.ext2E.tau_d,
-            g_max=FNSnet.J_e,
-        )
 
-
-class FNS(bp.Network):
+class Dewdrop(bp.Network):
     """
-    A spatially independent network of FNS neurons.
+    A spatially embedded network of FNS neurons.
+    network
     """
-
     def __init__(
         self,
-        N_e=30000,  # Number of Exc. neurons
+        rho=30000,  # Density of Exc. neurons (neurons per mm^2)
+        dx=1.0,  # Width of the spatial domain (mm)
+        sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
+        sigma_ei=0.1,
+        sigma_ie=0.1,
+        sigma_ii=0.125,
         omega_ee=0.1,  # Total 'mass' of connectivity probability (proportional to num. synapses)
         omega_ei=0.2,
         omega_ie=0.3,
         omega_ii=0.3,
+        boundary="periodic",
         include_self=False,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,  # ! Has same units as g_L: uS
+        J_e=0.0008,  # ! Currently abitrary. Has same units as g_L? uS
+        kernel=GaussianKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
-        copy_conn=False,  # Whether to copy connectivity from the provided network
+        copy_conn=False,  # Whether to copy connectivity from the provided Dewdrop
     ):
         super().__init__()
+
+        self.rho = rho
+        self.dx = dx
+        self.sigma_ee = sigma_ee
+        self.sigma_ei = sigma_ei
+        self.sigma_ie = sigma_ie
+        self.sigma_ii = sigma_ii
         self.omega_ee = omega_ee
         self.omega_ei = omega_ei
         self.omega_ie = omega_ie
         self.omega_ii = omega_ii
+        self.p_ee = kernel.mass2pmax(omega_ee, sigma_ee)
+        self.p_ei = kernel.mass2pmax(omega_ei, sigma_ei)
+        self.p_ie = kernel.mass2pmax(omega_ie, sigma_ie)
+        self.p_ii = kernel.mass2pmax(omega_ii, sigma_ii)
+        self.boundary = boundary
         self.include_self = include_self
         self.gamma = gamma
         self.delta = delta
@@ -131,20 +94,24 @@ class FNS(bp.Network):
             self.J_e * delta
         )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
         self.method = method
+        self.kernel = kernel
         self.key = key
-        self.N_e = N_e
-        self.N_i = N_e // gamma
+
+        # geometry
+        A = dx**2
+        ne = round(np.sqrt(rho * A))  # Number of grid points in each dimension
+        ni = round((ne**2) / gamma)
+
+        # dx bounds the grid, assuming left bottom corner is at (0, 0)
+        exc_positions = GridPositions((dx, dx))
 
         self.key, subkey = jax.random.split(self.key)
-        exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
-
-        self.key, subkey = jax.random.split(self.key)
-        inh_positions = ClusteredPositions((1.5, 0), 1, key=subkey)
+        inh_positions = RandomPositions((dx, dx), subkey)
 
         # neurons
         self.key, subkey = jax.random.split(self.key)
         self.E = FNSNeuron(
-            size=N_e,
+            size=[ne, ne],
             C=0.25,
             g_L=0.0167,
             V_L=-70.0,
@@ -162,7 +129,7 @@ class FNS(bp.Network):
         # Create a population of inhibitory neurons
         self.key, subkey = jax.random.split(self.key)
         self.I = FNSNeuron(
-            size=self.N_i,
+            size=ni,
             C=0.25,
             g_L=0.025,
             V_L=-70.0,
@@ -176,6 +143,8 @@ class FNS(bp.Network):
             method=method,
             embedding=inh_positions,
         )
+
+        # Connectivity topology
 
         # External population
         p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
@@ -192,7 +161,7 @@ class FNS(bp.Network):
             return CSRConn(indices, inptr)
 
         if copy_conn:
-            if isinstance(copy_conn, FNS):
+            if isinstance(copy_conn, Dewdrop):
                 copy_conn = copy_conn.get_connectivity()
 
             conn_ee = copy_connectivity(copy_conn["E2E"])
@@ -201,24 +170,49 @@ class FNS(bp.Network):
             conn_ii = copy_connectivity(copy_conn["I2I"])
             conn_exte = copy_connectivity(copy_conn["ext2E"])
             conn_exti = copy_connectivity(copy_conn["ext2I"])
+            self.N_e = copy_conn["N_e"]
+            self.N_i = copy_conn["N_i"]
 
         else:
             self.key, subkey = jax.random.split(self.key)
-            conn_ee = bp.connect.FixedProb(
-                prob=self.omega_ee, allow_multi_conn=True, seed=subkey
-            )
-
-            self.key, subkey = jax.random.split(self.key)
-            conn_ei = bp.connect.FixedProb(
-                prob=self.omega_ei, allow_multi_conn=True, seed=subkey
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ie = bp.connect.FixedProb(
-                prob=self.omega_ie, allow_multi_conn=True, seed=subkey
+            conn_ee = DistanceDependent(
+                kernel=kernel(sigma=self.sigma_ee, p_max=self.p_ee),
+                domain=self.E.embedding.domain,
+                positions_pre=self.E.positions,
+                positions_post=self.E.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
-            conn_ii = bp.connect.FixedProb(
-                prob=self.omega_ii, allow_multi_conn=True, seed=subkey
+            conn_ei = DistanceDependent(
+                kernel=kernel(sigma=self.sigma_ei, p_max=self.p_ei),
+                domain=self.E.embedding.domain,
+                positions_pre=self.E.positions,
+                positions_post=self.I.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_ie = DistanceDependent(
+                kernel=kernel(sigma=self.sigma_ie, p_max=self.p_ie),
+                domain=self.I.embedding.domain,
+                positions_pre=self.I.positions,
+                positions_post=self.E.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
+            )
+            self.key, subkey = jax.random.split(self.key)
+            conn_ii = DistanceDependent(
+                kernel=kernel(sigma=self.sigma_ii, p_max=self.p_ii),
+                domain=self.I.embedding.domain,
+                positions_pre=self.I.positions,
+                positions_post=self.I.positions,
+                boundary=boundary,
+                include_self=include_self,
+                seed=subkey,
             )
 
             self.key, subkey = jax.random.split(self.key)
@@ -229,6 +223,9 @@ class FNS(bp.Network):
             conn_exti = bp.connect.FixedProb(
                 prob=p_ext, allow_multi_conn=True, seed=subkey
             )
+
+            self.N_e = self.E.size
+            self.N_i = self.I.size
 
         # Synapses
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
@@ -317,7 +314,7 @@ class FNS(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.delta, self.J_e)
+        self.reinit_weights(self.delta, self.J_e)  # !! Need to fix it seems
 
     def reinit_weights(self, delta=None, J_e=None):
         if delta is not None:
@@ -386,21 +383,26 @@ class FNS(bp.Network):
                 "indices": self.ext2I.proj.comm.indices,
                 "indptr": self.ext2I.proj.comm.indptr,
             },
+            "N_e": self.N_e,
+            "N_i": self.N_i,
         }
 
     def get_input_params(self):
         keys = [
-            "N_e",
+            "rho",
+            "dx",
             "sigma_ee",
             "sigma_ei",
             "sigma_ie",
             "sigma_ii",
+            "boundary",
             "include_self",
             "gamma",
             "delta",
             "nu",
             "n_ext",
             "J_e",
+            "kernel",
             "method",
             "key",
         ]
@@ -410,18 +412,52 @@ class FNS(bp.Network):
             raise ValueError("Missing parameters: {}".format(missings))
         return _params
 
-    def expected_indegree(self, pop="ee"):
+    def expected_indegree(self, pop="ee", approx=True):
         """
-        Calculate the expected in-degree for a given population.
+        Compute the mean indegree.
+        Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large
+        dx/small sigma.
         """
+        assert self.boundary == "periodic"
+        dx = self.dx
+        if pop[0] == "e":
+            rho = self.rho
+        else:
+            rho = self.rho / self.gamma
         if pop == "ee":
-            return self.N_e * self.omega_ee
+            p_max = self.p_ee
+            sigma = self.sigma_ee
         elif pop == "ei":
-            return self.N_i * self.omega_ei
+            p_max = self.p_ei
+            sigma = self.sigma_ei
         elif pop == "ie":
-            return self.N_e * self.omega_ie
+            p_max = self.p_ie
+            sigma = self.sigma_ie
         elif pop == "ii":
-            return self.N_i * self.omega_ii
+            p_max = self.p_ii
+            sigma = self.sigma_ii
+
+        if approx:
+            result = 2 * np.pi * sigma**2 * p_max
+        else:
+
+            def integrand(y, x, dx, sigma, p_max):
+                # y is integrated first, x second (dblquad's calling convention).
+                rx = min(x, dx - x)
+                ry = min(y, dx - y)
+                r2 = rx * rx + ry * ry
+                return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
+
+            result, error_est = dblquad(
+                integrand,
+                0,
+                dx,  # outer integral range for x
+                lambda x: 0,  # lower limit for y
+                lambda x: dx,  # upper limit for y
+                args=(dx, sigma, p_max),
+            )
+
+        return rho * result
 
     def calculate_zeta(self):
         """
@@ -438,10 +474,13 @@ class FNS(bp.Network):
 
         assert len(mats[2][0]) == len(weights[2])
 
-        w_E2E = np.bincount(mats[0][1], weights=weights[0], minlength=self.N_e)
-        w_E2I = np.bincount(mats[1][1], weights=weights[1], minlength=self.N_i)
-        w_I2E = np.bincount(mats[2][1], weights=weights[2], minlength=self.N_e)
-        w_I2I = np.bincount(mats[3][1], weights=weights[3], minlength=self.N_i)
+        Ne = np.prod(self.E.size)
+        Ni = np.prod(self.I.size)
+
+        w_E2E = np.bincount(mats[0][1], weights=weights[0], minlength=Ne)
+        w_E2I = np.bincount(mats[1][1], weights=weights[1], minlength=Ni)
+        w_I2E = np.bincount(mats[2][1], weights=weights[2], minlength=Ne)
+        w_I2I = np.bincount(mats[3][1], weights=weights[3], minlength=Ni)
 
         IE_e = np.mean(w_I2E) / np.mean(w_E2E)
         IE_i = np.mean(w_I2I) / np.mean(w_E2I)
@@ -452,48 +491,22 @@ class FNS(bp.Network):
         Calculate the effective IE ratio for inhibitory and excitatory populations.
         The ratio represents total inhibitory strength divided by
         total excitatory strength (for the average neuron) per neuron type.
-        See also `calculate_zeta`.
         """
-        # For excitatory neurons: (N_i/gamma * omega_ie * J_i) / (N_e * omega_ee * J_e)
-        # Since J_i = J_e * delta and N_i = N_e / gamma:
-        IE_e = (self.omega_ie * self.delta) / (self.gamma * self.omega_ee)
+        # * An approximation to the distance kernel that is not valid with periodic
+        # * boundaries when the kernel is too wide
+        zeta_e = (
+            self.delta
+            * (self.sigma_ie**2 * self.p_ie)
+            / (self.gamma * self.sigma_ee**2 * self.p_ee)
+        )
 
-        # For inhibitory neurons: (N_i/gamma * omega_ii * J_i) / (N_e * omega_ei * J_e)
-        # Similar simplification:
-        IE_i = (self.omega_ii * self.delta) / (self.gamma * self.omega_ei)
+        zeta_i = (
+            self.delta
+            * (self.sigma_ii**2 * self.p_ii)
+            / (self.gamma * self.sigma_ei**2 * self.p_ei)
+        )
 
-        return IE_e, IE_i
-
-    # def nu_next_thresh(self):  # !!! WROOOOONG
-    #     """
-    #     Calculate the minimum threshold for the product nu*n_ext to achieve spontaneous
-    #     firing of external and inhibitory populations
-    #     """
-    #     thr_e = self.E.g_L * (self.E.V_th - self.E.V_L) / self.J_e
-    #     thr_i = self.I.g_L * (self.I.V_th - self.I.V_L) / self.J_e
-    #     return thr_e, thr_i
-
-    def steady_state_membrane_potential(self, filter_factor=0.42):
-        """
-        Calculate the mean voltage for a given population due solely to background input
-        """
-        # filter_factor_e = 0.42  # This needs to be something else
-        # filter_factor_i = 0.42  # This needs to be something else
-        Ve = self.E.V_L + (self.n_ext * self.nu * self.J_e / self.E.g_L) * filter_factor
-        Vi = self.I.V_L + (self.n_ext * self.nu * self.J_e / self.I.g_L) * filter_factor
-
-        return Ve, Vi
-
-    def estimate_filter_factor(self, pop="E", n_ext=10):  # E.g. pop = self.I
-        # Estimate the filter factor for the steady-state membrane potential by simulating
-        # many instances of a single neuron
-        neuron = SingleNeuron(self, pop=pop, n_ext=n_ext)
-        duration = 1000.0
-        monitors = ["neuron.V"]
-        # Run the simulation
-        runner = bp.DSRunner(neuron, monitors=monitors)
-        runner.run(duration=duration)
-        return np.mean(runner.mon["neuron.V"])
+        return zeta_e, zeta_i
 
     def copy(self):
         _params = self.get_input_params()
@@ -535,6 +548,7 @@ class FNS(bp.Network):
             return run
 
         key = np.array(self.key)
+        print(key)
         # If gpu available, use vmap
         if jax.lib.xla_bridge.get_backend().platform == "gpu":
             run = copy_run(
@@ -554,3 +568,49 @@ class FNS(bp.Network):
                 run, [deltas], num_parallel=num_parallel, clear_buffer=False
             )
         return res
+
+    def to_dict(
+        self,
+        keys=[
+            "rho",
+            "dx",
+            "sigma_ee",
+            "sigma_ei",
+            "sigma_ie",
+            "sigma_ii",
+            "omega_ee",
+            "omega_ei",
+            "omega_ie",
+            "omega_ii",
+            "p_ee",
+            "p_ei",
+            "p_ie",
+            "p_ii",
+            "boundary",
+            "include_self",
+            "gamma",
+            "g",
+            "nu",
+            "p_ext",
+            "J_e",
+            "method",
+        ],
+    ):
+        out = {
+            "parameters": {
+                key: maybe_initializer(value)
+                for key, value in self.__dict__.items()
+                if key in keys
+            }
+        }
+        out["populations"] = {
+            "E": self.E.to_dict(),
+            "I": self.I.to_dict(),
+        }
+        out["synapses"] = {
+            "E2E": self.E2E.to_dict(),
+            "E2I": self.E2I.to_dict(),
+            "I2E": self.I2E.to_dict(),
+            "I2I": self.I2I.to_dict(),
+        }
+        return {self.__class__.__name__: out}

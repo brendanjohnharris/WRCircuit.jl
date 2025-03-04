@@ -12,13 +12,13 @@ Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.FNScircuit
-    modelname = "FNScircuit"
+    model = models.Dewdrop
+    modelname = "Dewdrop"
 
     begin # Dewdrop parameters
         dx = 0.75 # mm
         rho = 30000.0
-        kernel = models.FNS.GaussianKernel
+        kernel = distances.GaussianKernel
         J_e = 0.0008 # Microsiemens
         delta = 2.0 # 2.9
         nu = 10.0 # Preserve; the minimum required for spontaneous spiking
@@ -59,7 +59,7 @@ begin
             xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
 
             conn = m.get_connectivity()
-            conn = models.FNS.pytree_to_numpy(conn) # Freeze the connectivity
+            conn = models.Dewdrop.pytree_to_numpy(conn) # Freeze the connectivity
             _params = m.get_input_params() |> convert2(Dict{Symbol, Any})
             model_class = m.__class__
 

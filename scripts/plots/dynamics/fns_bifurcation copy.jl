@@ -13,8 +13,8 @@ set_theme!(foresight(:physics))
 brainpy.math.set_platform("cpu")
 
 begin
-    model = models.FNScircuit
-    modelname = "FNScircuit"
+    model = models.Dewdrop
+    modelname = "Dewdrop"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -28,7 +28,7 @@ begin
         sigma_ei = 9.5 * delta
         sigma_ie = 19 * delta
         sigma_ii = 19 * delta
-        kernel = models.FNS.ExponentialKernel
+        kernel = distances.ExponentialKernel
         J_e = 0.0008 # Microsiemens
         delta = 4
         nu = 10
@@ -103,19 +103,19 @@ begin
 
     out = pmap(deltas) do delta # Maybe have to clear live arrays for each worker?
         @info "δ = $delta"
-        m̂ = models.FNScircuit(rho = rho, dx = dx, J_e = J_e,
-                               nu = 120, n_ext = 25,
-                               delta = delta,
-                               p_ee = p_ee,
-                               p_ei = p_ei,
-                               p_ie = p_ie,
-                               p_ii = p_ii,
-                               sigma_ee = sigma_ee,
-                               sigma_ei = sigma_ei,
-                               sigma_ie = sigma_ie,
-                               sigma_ii = sigma_ii,
-                               kernel = kernel,
-                               key = jax.random.PRNGKey(42))
+        m̂ = models.Dewdrop(rho = rho, dx = dx, J_e = J_e,
+                            nu = 120, n_ext = 25,
+                            delta = delta,
+                            p_ee = p_ee,
+                            p_ei = p_ei,
+                            p_ie = p_ie,
+                            p_ii = p_ii,
+                            sigma_ee = sigma_ee,
+                            sigma_ei = sigma_ei,
+                            sigma_ie = sigma_ie,
+                            sigma_ii = sigma_ii,
+                            kernel = kernel,
+                            key = jax.random.PRNGKey(42))
         res = bpsolve(m̂, T; populations = [:E], vars = [:spike], transient)
         spikes = res[Var = At(:spike)][Population = At(:E)]
         begin # * Susceptibility
