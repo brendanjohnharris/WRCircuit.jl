@@ -16,7 +16,7 @@ begin
     modelname = "FNScircuit"
 
     begin # Dewdrop parameters
-        dx = 0.5 # mm
+        dx = 0.75 # mm
         rho = 30000.0
         kernel = models.FNS.GaussianKernel
         J_e = 0.0008 # Microsiemens
@@ -40,7 +40,7 @@ begin
     parameters = (; rho, dx, J_e, nu, n_ext, delta, omega_ee, omega_ei, omega_ie, omega_ii,
                   sigma_ee, sigma_ei, sigma_ie, sigma_ii, kernel)
 
-    deltas = range(2, 5, length = 30)
+    deltas = range(1.5, 3, length = 50)
     nus = range(10, 10, length = 1)
 
     T = 10u"s"
