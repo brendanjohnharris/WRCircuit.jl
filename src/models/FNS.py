@@ -39,12 +39,13 @@ from ..synapses import *
 
 
 class SingleNeuron(bp.Network):
-    def __init__(self, FNSnet, pop="E", n_ext=10):
-        super().__init_()
+    def __init__(self, FNSnet, pop="E", nu_n_ext=100, n_ext=10):
+        super().__init__()
+        nu = nu_n_ext / n_ext
         if pop == "E":
             neuron = FNSnet.E.__class__
-            neuron = neuron(
-                size=FNSnet.E.size,
+            self.neuron = neuron(
+                size=1,
                 C=FNSnet.E.C,
                 g_L=FNSnet.E.g_L,
                 V_L=FNSnet.E.V_L,
@@ -54,14 +55,14 @@ class SingleNeuron(bp.Network):
                 V_K=FNSnet.E.V_K,
                 tau_K=FNSnet.E.tau_K,
                 Delta_g_K=FNSnet.E.Delta_g_K,
-                V_initializer=FNSnet.E.V_rt,
+                V_initializer=bp.init.Uniform(-55.0, -50.0),
                 method=FNSnet.E.method,
                 embedding=None,
             )
         elif pop == "I":
             neuron = FNSnet.I.__class__
-            neuron = neuron(
-                size=FNSnet.I.size,
+            self.neuron = neuron(
+                size=1,
                 C=FNSnet.I.C,
                 g_L=FNSnet.I.g_L,
                 V_L=FNSnet.I.V_L,
@@ -71,13 +72,13 @@ class SingleNeuron(bp.Network):
                 V_K=FNSnet.I.V_K,
                 tau_K=FNSnet.I.tau_K,
                 Delta_g_K=FNSnet.I.Delta_g_K,
-                V_initializer=FNSnet.I.V_rt,
+                V_initializer=bp.init.Uniform(-55.0, -50.0),
                 method=FNSnet.I.method,
                 embedding=None,
             )
         self.ext = bp.dyn.PoissonGroup(
             size=n_ext,
-            freqs=FNSnet.nu,
+            freqs=nu,
             keep_size=False,
             sharding=None,
             spk_type=None,
@@ -85,13 +86,139 @@ class SingleNeuron(bp.Network):
             mode=None,
         )
         self.ext2neuron = Synapse(
-            pre=FNSnet.ext,
-            post=FNSnet.E,
-            conn=bp.connect.All2All(include_FNSnet=True),
+            pre=self.ext,
+            post=self.neuron,
+            conn=bp.connect.All2All(include_self=True),
             delay=2.0,
             tau_d=FNSnet.ext2E.tau_d,
             g_max=FNSnet.J_e,
         )
+
+
+class DisconnectedFNS(bp.Network):
+    """
+    A spatially independent network of FNS neurons, driven purely by background input
+    """
+
+    def __init__(
+        self,
+        N_e=30000,  # Number of Exc. neurons
+        include_self=False,
+        gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
+        delta=4,  # Per-neuron synaptic weight I:E ratio
+        nu=1,  # External population firing rate
+        n_ext=10,  # Number of external synapses per Exc. neuron
+        J_e=0.0008,  # ! Has same units as g_L: uS
+        method="exp_auto",
+        key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
+    ):
+        super().__init__()
+        self.include_self = include_self
+        self.gamma = gamma
+        self.delta = delta
+        self.nu = nu
+        self.n_ext = n_ext
+        self.J_e = J_e
+        self.method = method
+        self.key = key
+        self.N_e = N_e
+        self.N_i = N_e // gamma
+
+        self.key, subkey = jax.random.split(self.key)
+        exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
+
+        self.key, subkey = jax.random.split(self.key)
+        inh_positions = ClusteredPositions((1.5, 0), 1, key=subkey)
+
+        # neurons
+        self.key, subkey = jax.random.split(self.key)
+        self.E = FNSNeuron(
+            size=N_e,
+            C=0.25,
+            g_L=0.0167,
+            V_L=-70.0,
+            V_th=-50.0,
+            V_rt=-70.0,
+            tau_ref=4.0,
+            V_K=-85.0,
+            tau_K=60.0,
+            Delta_g_K=0.002,
+            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
+            method=method,
+            embedding=exc_positions,
+        )
+
+        # Create a population of inhibitory neurons
+        self.key, subkey = jax.random.split(self.key)
+        self.I = FNSNeuron(
+            size=self.N_i,
+            C=0.25,
+            g_L=0.025,
+            V_L=-70.0,
+            V_th=-50.0,
+            V_rt=-70.0,
+            tau_ref=4.0,
+            V_K=-85.0,
+            tau_K=60.0,
+            Delta_g_K=0.0,  # No adaptation for inhibitory neurons
+            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
+            method=method,
+            embedding=inh_positions,
+        )
+
+        # External population
+        p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
+        N_ext = int(np.round(self.E.num * p_ext))
+
+        self.key, subkey = jax.random.split(self.key)
+        conn_exte = bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey)
+        self.key, subkey = jax.random.split(self.key)
+        conn_exti = bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey)
+
+        # Synapses
+        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
+        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
+        V_rev_e = 0.0
+        V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
+
+        # External population
+        self.key, subkey = jax.random.split(self.key)
+        self.ext = bp.dyn.PoissonGroup(
+            size=N_ext,
+            freqs=self.nu,
+            keep_size=False,
+            sharding=None,
+            spk_type=None,
+            name=None,
+            mode=None,
+            seed=subkey,
+        )
+        self.ext2E = Synapse(
+            pre=self.ext,
+            post=self.E,
+            conn=conn_exte,
+            delay=2.0,
+            tau_d=tau_d_e,
+            g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
+        )
+        self.ext2I = Synapse(
+            pre=self.ext,
+            post=self.I,
+            conn=conn_exti,
+            delay=2.0,
+            tau_d=tau_d_e,
+            g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
+        )
+
+        # define input variables given to E/I populations
+        self.Ein = bp.dyn.InputVar(self.E.varshape)
+        self.Iin = bp.dyn.InputVar(self.I.varshape)
+        self.E.add_inp_fun("", self.Ein)
+        self.I.add_inp_fun("", self.Iin)
 
 
 class FNS(bp.Network):
@@ -153,7 +280,7 @@ class FNS(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.002,
+            Delta_g_K=0.003,  # 0.003 for guazhang, 0.002 for shencong
             V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
@@ -231,6 +358,8 @@ class FNS(bp.Network):
             )
 
         # Synapses
+        tau_r_e = 1.0
+        tau_r_i = 1.0
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
         tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
@@ -239,10 +368,10 @@ class FNS(bp.Network):
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
-            delay=2.0,
+            delay=1.5,
             conn=conn_ee,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=tau_r_e,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
@@ -251,10 +380,10 @@ class FNS(bp.Network):
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
-            delay=2.0,
+            delay=1.5,
             conn=conn_ei,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=tau_r_e,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
@@ -265,7 +394,7 @@ class FNS(bp.Network):
             delay=2.0,
             conn=conn_ie,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=tau_r_i,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
@@ -276,7 +405,7 @@ class FNS(bp.Network):
             delay=2.0,
             conn=conn_ii,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=tau_r_i,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
@@ -297,17 +426,21 @@ class FNS(bp.Network):
             pre=self.ext,
             post=self.E,
             conn=conn_exte,
-            delay=2.0,
+            delay=1.5,
             tau_d=tau_d_e,
             g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
         )
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,
             conn=conn_exti,
-            delay=2.0,
+            delay=1.5,
             tau_d=tau_d_e,
             g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
         )
 
         # define input variables given to E/I populations
@@ -391,10 +524,10 @@ class FNS(bp.Network):
     def get_input_params(self):
         keys = [
             "N_e",
-            "sigma_ee",
-            "sigma_ei",
-            "sigma_ie",
-            "sigma_ii",
+            "omega_ee",
+            "omega_ei",
+            "omega_ie",
+            "omega_ii",
             "include_self",
             "gamma",
             "delta",
@@ -415,13 +548,18 @@ class FNS(bp.Network):
         Calculate the expected in-degree for a given population.
         """
         if pop == "ee":
-            return self.N_e * self.omega_ee
+            # Subtract 1 if self-connections are excluded
+            adjustment = 0 if self.include_self else 1 / self.N_e
+            return self.N_e * self.omega_ee - adjustment
         elif pop == "ei":
-            return self.N_i * self.omega_ei
+            return self.N_e * self.omega_ei
         elif pop == "ie":
-            return self.N_e * self.omega_ie
+            return self.N_i * self.omega_ie
         elif pop == "ii":
-            return self.N_i * self.omega_ii
+            adjustment = 0 if self.include_self else 1 / self.N_i
+            return self.N_i * self.omega_ii - adjustment
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
 
     def calculate_zeta(self):
         """
@@ -473,27 +611,59 @@ class FNS(bp.Network):
     #     thr_i = self.I.g_L * (self.I.V_th - self.I.V_L) / self.J_e
     #     return thr_e, thr_i
 
-    def steady_state_membrane_potential(self, filter_factor=0.42):
-        """
-        Calculate the mean voltage for a given population due solely to background input
-        """
-        # filter_factor_e = 0.42  # This needs to be something else
-        # filter_factor_i = 0.42  # This needs to be something else
-        Ve = self.E.V_L + (self.n_ext * self.nu * self.J_e / self.E.g_L) * filter_factor
-        Vi = self.I.V_L + (self.n_ext * self.nu * self.J_e / self.I.g_L) * filter_factor
+    def linear_subthreshold_equilibrium(self):
+        Ve = self.n_ext * self.nu * self.J_e / self.E.g_L
+        Vi = self.n_ext * self.nu * self.J_e / self.I.g_L
 
         return Ve, Vi
 
-    def estimate_filter_factor(self, pop="E", n_ext=10):  # E.g. pop = self.I
+    def subthreshold_equilibrium_potential(self, alpha_e=0.4202, alpha_i=0.4507):
+        """
+        Calculate the mean voltage for a given population due solely to background input.
+        Corrected by filter_factor which you shoudl estimate from the subthreshold transfer function.
+        """
+        Ve, Vi = self.linear_subthreshold_equilibrium()
+        Ve = self.E.V_L + Ve * alpha_e
+        Vi = self.I.V_L + Vi * alpha_i
+
+        return Ve, Vi
+
+    def estimate_filter_factor(
+        self, nu_n_ext=range(50, 450, 10), num_parallel=32
+    ):  # E.g. pop = self.I
         # Estimate the filter factor for the steady-state membrane potential by simulating
         # many instances of a single neuron
-        neuron = SingleNeuron(self, pop=pop, n_ext=n_ext)
-        duration = 1000.0
-        monitors = ["neuron.V"]
-        # Run the simulation
-        runner = bp.DSRunner(neuron, monitors=monitors)
-        runner.run(duration=duration)
-        return np.mean(runner.mon["neuron.V"])
+        def run(nu_n_ext):
+            nu = nu_n_ext / self.n_ext
+            disconnect = DisconnectedFNS(
+                N_e=self.N_e,
+                gamma=self.gamma,
+                delta=self.delta,
+                nu=nu,
+                n_ext=self.n_ext,
+                J_e=self.J_e,
+                method=self.method,
+                key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
+            )
+            duration = 1000.0
+            monitors = ["E.V", "I.V"]
+            # Run the simulation
+            runner = bp.DSRunner(
+                disconnect, monitors=monitors, numpy_mon_after_run=False
+            )
+            runner.run(duration=duration)
+            Ve = runner.mon["E.V"].view()
+            Vi = runner.mon["I.V"].view()
+            out = {
+                "E": {"mean": bp.math.mean(Ve), "std": bp.math.std(Ve)},
+                "I": {"mean": bp.math.mean(Vi), "std": bp.math.std(Vi)},
+            }
+            return out
+
+        res = bp.running.jax_vectorize_map(
+            run, [nu_n_ext], num_parallel=num_parallel, clear_buffer=True
+        )
+        return res
 
     def copy(self):
         _params = self.get_input_params()

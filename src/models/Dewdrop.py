@@ -37,12 +37,12 @@ from ..positions import *
 from ..synapses import *
 
 
-
 class Dewdrop(bp.Network):
     """
     A spatially embedded network of FNS neurons.
     network
     """
+
     def __init__(
         self,
         rho=30000,  # Density of Exc. neurons (neurons per mm^2)
@@ -297,6 +297,8 @@ class Dewdrop(bp.Network):
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
         )
         self.ext2I = Synapse(
             pre=self.ext,
@@ -305,6 +307,8 @@ class Dewdrop(bp.Network):
             delay=2.0,
             tau_d=tau_d_e,
             g_max=self.J_e,
+            tau_r=1.0,
+            V_rev=V_rev_e,
         )
 
         # define input variables given to E/I populations

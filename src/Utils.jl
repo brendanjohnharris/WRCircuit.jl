@@ -1,9 +1,10 @@
 using Bootstrap
 using Normalization
 using StatsBase
+using Random
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts, timebins
+       structurefunction, histcounts, timebins, unitarylfp, to_ms
 
 function _preamble()
     quote
@@ -160,3 +161,68 @@ TimeseriesTools.coarsegrain(x::UnivariateRegular, τ::Number) = timebins(x, τ)
 
 #     return Stable(αₑₛₜ, βₑₛₜ, σₑₛₜ, μₑₛₜ)
 # end
+
+# ? Unitary LFP (Telenczuck 2020)
+
+to_ms(x::Real) = x * u"ms" # Assume ms already
+to_ms(x::Quantity) = uconvert(u"ms", x)
+
+function check_inputs(times, spikes, spike_type)
+    if !(spike_type in [:E, :I])
+        error("spike_type must be 'exc' or 'inh'.")
+    end
+    if ndims(spikes) != 2
+        error("spikes must be 2D.")
+    end
+    if length(times) != size(spikes, 1)
+        error("Mismatch between length of times and first dimension of spikes.")
+    end
+end
+
+function generate_positions(n, xmax, ymax, seed)
+    rng = isnothing(seed) ? Random.GLOBAL_RNG : MersenneTwister(seed)
+    return rand(rng, Float32, n) .* xmax, rand(rng, Float32, n) .* ymax
+end
+
+function get_amplitudes(location)
+    if location === :soma
+        return 0.48, 3.0
+    elseif location === :deep
+        return -0.16, -0.2
+    elseif location === :superficial
+        return 0.24, -1.2
+    elseif location === :surface
+        return -0.08, 0.3
+    else
+        error("Location not implemented.")
+    end
+end
+
+function unitarylfp(times, spikes, spike_type;
+                    xmax = 0.2, ymax = 0.2, va = 200.0, lambda_ = 0.2,
+                    sig_i = 2.1, sig_e = 2.1 * 1.5, location = :soma,
+                    seed = nothing)
+    check_inputs(times, spikes, spike_type)
+    times = map(ustrip ∘ to_ms, times)
+    times = map(Float32, times)
+    nt, nn = size(spikes)
+    px, py = generate_positions(nn, xmax, ymax, seed)
+    dist = sqrt.((px .- xmax / 2) .^ 2 .+ (py .- ymax / 2) .^ 2)
+    ae, ai = get_amplitudes(location)
+    A = exp.(-dist ./ lambda_) .* (spike_type === :E ? ae : ai)
+    delay = 10.4 .+ dist ./ va
+    delay = delay
+    τ = spike_type === :E ? 2 * sig_e^2 : 2 * sig_i^2
+    τ = Float32(τ)
+    idxs = findall(==(1), spikes)
+    iis = [I[1] for I in idxs]
+    ids = [I[2] for I in idxs]
+    tts = times[iis] .+ delay[ids]
+    tts = map(Float32, tts)
+    amps = map(Float32, A[ids])
+    time_mat = @. times' - tts
+    exp_mat = @. exp(-time_mat^2 / τ)
+    weighted = amps .* exp_mat
+    x = vec(sum(weighted, dims = 1))
+    return TimeseriesTools.TimeSeries(times .* u"ms", x)
+end
