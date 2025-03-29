@@ -361,7 +361,7 @@ class FNS(bp.Network):
         tau_r_e = 1.0
         tau_r_i = 1.0
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
+        tau_d_i = 3.0  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
