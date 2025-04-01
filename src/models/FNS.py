@@ -29,6 +29,7 @@ from brainpy.types import Shape, ArrayType
 from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
 from brainpy._src.connect.base import get_idx_type
+from brainpy._src.dyn.utils import get_spk_type
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..utils import *
@@ -171,9 +172,9 @@ class DisconnectedFNS(bp.Network):
         N_ext = int(np.round(self.E.num * p_ext))
 
         self.key, subkey = jax.random.split(self.key)
-        conn_exte = bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey)
+        conn_exte = FixedProb(prob=p_ext, seed=subkey)
         self.key, subkey = jax.random.split(self.key)
-        conn_exti = bp.connect.FixedProb(prob=p_ext, allow_multi_conn=True, seed=subkey)
+        conn_exti = FixedProb(prob=p_ext, seed=subkey)
 
         # Synapses
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
@@ -219,6 +220,54 @@ class DisconnectedFNS(bp.Network):
         self.Iin = bp.dyn.InputVar(self.I.varshape)
         self.E.add_inp_fun("", self.Ein)
         self.I.add_inp_fun("", self.Iin)
+
+
+class PoissonGroup(bp.dyn.NeuDyn):
+    def __init__(
+        self,
+        size: Shape,
+        freqs: Union[int, float, jax.Array, bm.Array, Callable],
+        keep_size: bool = False,
+        sharding: Optional[Sequence[str]] = None,
+        spk_type: Optional[type] = None,
+        name: Optional[str] = None,
+        mode: Optional[bm.Mode] = None,
+        seed: Union[int, jnp.ndarray] = 42,
+    ):
+        super().__init__(
+            size=size, sharding=sharding, name=name, keep_size=keep_size, mode=mode
+        )
+        # parameters
+        self.freqs = parameter(freqs, self.num, allow_none=False)
+        self.spk_type = get_spk_type(spk_type, self.mode)
+
+        # Make the seed a brainpy variable so it's tracked in JAX transformations.
+        # Just convert to a PRNGKey if you want to allow integer seeds.
+        if isinstance(seed, int):
+            seed = jax.random.PRNGKey(seed)
+        self.seed = self.init_variable(
+            lambda shape: seed,  # must accept one argument for shape
+            shape=seed.shape,  # the shape is (2,)
+            batch_or_mode=None,
+        )
+
+        # variables
+        self.reset_state(self.mode)
+
+    def update(self):
+        key, subkey = jax.random.split(self.seed.value)  # ! Super slow...
+        self.seed.value = key
+        spikes = jax.random.uniform(
+            subkey, shape=self.spike.shape, dtype=jnp.float32
+        ) <= (self.freqs * bp.share["dt"] / 1000.0)
+
+        self.spike.value = spikes
+        return spikes
+
+    def reset_state(self, batch_or_mode=None, **kwargs):
+        self.spike = self.init_variable(
+            partial(jnp.zeros, dtype=self.spk_type), batch_or_mode
+        )
 
 
 class FNS(bp.Network):
@@ -330,38 +379,21 @@ class FNS(bp.Network):
             conn_exti = copy_connectivity(copy_conn["ext2I"])
 
         else:
-            self.key, subkey = jax.random.split(self.key)
-            conn_ee = bp.connect.FixedProb(
-                prob=self.omega_ee, allow_multi_conn=True, seed=subkey
-            )
 
-            self.key, subkey = jax.random.split(self.key)
-            conn_ei = bp.connect.FixedProb(
-                prob=self.omega_ei, allow_multi_conn=True, seed=subkey
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ie = bp.connect.FixedProb(
-                prob=self.omega_ie, allow_multi_conn=True, seed=subkey
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ii = bp.connect.FixedProb(
-                prob=self.omega_ii, allow_multi_conn=True, seed=subkey
-            )
+            self.key, *subkeys = jax.random.split(self.key, 7)
+            conn_ee = FixedProb(prob=self.omega_ee, seed=subkeys[0])
+            conn_ei = FixedProb(prob=self.omega_ei, seed=subkeys[1])
+            conn_ie = FixedProb(prob=self.omega_ie, seed=subkeys[2])
+            conn_ii = FixedProb(prob=self.omega_ii, seed=subkeys[3])
 
-            self.key, subkey = jax.random.split(self.key)
-            conn_exte = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_exti = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
+            conn_exte = FixedProb(prob=p_ext, seed=subkeys[4])
+            conn_exti = FixedProb(prob=p_ext, seed=subkeys[5])
 
         # Synapses
         tau_r_e = 1.0
         tau_r_i = 1.0
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 3.5  # 3.0 for yifan, # 4.5 for shencong
+        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
@@ -412,16 +444,17 @@ class FNS(bp.Network):
 
         # External population
         self.key, subkey = jax.random.split(self.key)
-        self.ext = bp.dyn.PoissonGroup(
-            size=N_ext,
-            freqs=self.nu,
-            keep_size=False,
-            sharding=None,
-            spk_type=None,
-            name=None,
-            mode=None,
-            seed=subkey,
-        )
+        # self.ext = PoissonGroup(
+        #     size=N_ext,
+        #     freqs=self.nu,
+        #     keep_size=False,
+        #     sharding=None,
+        #     spk_type=None,
+        #     name=None,
+        #     mode=None,
+        #     seed=subkey,
+        # )
+        self.ext = bp.dyn.PoissonInput(size=10, freq=10.0)  # ! Naw doawg..
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
@@ -452,11 +485,7 @@ class FNS(bp.Network):
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
         self.reinit_weights(self.delta, self.J_e)
 
-    def reinit_weights(self, delta=None, J_e=None):
-        if delta is not None:
-            self.delta = delta
-        if J_e is not None:
-            self.J_e = J_e
+    def _reinit_weights(self, delta, J_e):
         self.J_i = self.J_e * self.delta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(
@@ -485,7 +514,14 @@ class FNS(bp.Network):
         self.ext2I.proj.comm.weight = correlate_weights(
             self.ext2I.proj, self.J_e, self.N_i, subkey
         )
-        self.reset_state()  ## or bp.reset_state(self)??
+
+    def reinit_weights(self, delta=None, J_e=None):
+        if delta is not None:
+            self.delta = delta
+        if J_e is not None:
+            self.J_e = J_e
+        self._reinit_weights(delta, J_e)
+        self.reset_state()  ## or bp.reset_state(self)?? Is either needed?
 
     def reinit_nu(self, nu):
         self.nu = nu

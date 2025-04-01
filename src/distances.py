@@ -322,3 +322,68 @@ class ExponentialKernel(AbstractKernel):
         Return a dictionary representation of the kernel's parameters.
         """
         return {"sigma": self.sigma, "p_max": self.p_max}
+
+
+class FixedProb(TwoEndConnector):
+    def __init__(
+        self,
+        prob,
+        pre_ratio=1.0,
+        include_self=True,
+        seed=None,
+        **kwargs,
+    ):
+        super(FixedProb, self).__init__(**kwargs)
+        assert 0.0 <= prob <= 1.0
+        assert 0.0 <= pre_ratio <= 1.0
+        self.prob = prob
+        self.pre_ratio = pre_ratio
+        self.include_self = include_self
+        self.seed = seed
+        self._jaxrand = bm.random.default_rng(self.seed)
+
+    def _iii(self):
+        if (not self.include_self) and (self.pre_num != self.post_num):
+            raise bp.ConnectorError(
+                f"We found pre_num != post_num ({self.pre_num} != {self.post_num}). "
+                f"But `include_self` is set to True."
+            )
+
+        if self.pre_ratio < 1.0:
+            pre_num_to_select = int(self.pre_num * self.pre_ratio)
+            pre_ids = self._jaxrand.choice(
+                self.pre_num, size=(pre_num_to_select,), replace=False
+            )
+        else:
+            pre_num_to_select = self.pre_num
+            pre_ids = jnp.arange(self.pre_num)
+
+        post_num_total = self.post_num
+        post_num_to_select = int(self.post_num * self.prob)
+
+        selected_post_ids = self._jaxrand.randint(
+            0, post_num_total, (pre_num_to_select, post_num_to_select)
+        )
+
+        return (
+            pre_num_to_select,
+            post_num_to_select,
+            bm.as_jax(selected_post_ids),
+            bm.as_jax(pre_ids),
+        )
+
+    def build_csr(self):
+        pre_num_to_select, post_num_to_select, selected_post_ids, pre_ids = self._iii()
+        pre_nums = jnp.ones(pre_num_to_select) * post_num_to_select
+        if not self.include_self:
+            true_ids = selected_post_ids == jnp.reshape(pre_ids, (-1, 1))
+            pre_nums -= jnp.sum(true_ids, axis=1)
+            selected_post_ids = selected_post_ids.flatten()[
+                jnp.logical_not(true_ids).flatten()
+            ]
+        else:
+            selected_post_ids = selected_post_ids.flatten()
+        selected_pre_inptr = jnp.cumsum(jnp.concatenate([jnp.zeros(1), pre_nums]))
+        return selected_post_ids.astype(get_idx_type()), selected_pre_inptr.astype(
+            get_idx_type()
+        )
