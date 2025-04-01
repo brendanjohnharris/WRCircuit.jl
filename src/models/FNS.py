@@ -444,17 +444,16 @@ class FNS(bp.Network):
 
         # External population
         self.key, subkey = jax.random.split(self.key)
-        # self.ext = PoissonGroup(
-        #     size=N_ext,
-        #     freqs=self.nu,
-        #     keep_size=False,
-        #     sharding=None,
-        #     spk_type=None,
-        #     name=None,
-        #     mode=None,
-        #     seed=subkey,
-        # )
-        self.ext = bp.dyn.PoissonInput(size=10, freq=10.0)  # ! Naw doawg..
+        self.ext = PoissonGroup(
+            size=N_ext,
+            freqs=self.nu,
+            keep_size=False,
+            sharding=None,
+            spk_type=None,
+            name=None,
+            mode=None,
+            seed=subkey,
+        )
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,

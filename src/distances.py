@@ -342,7 +342,9 @@ class FixedProb(TwoEndConnector):
         self.seed = seed
         self._jaxrand = bm.random.default_rng(self.seed)
 
-    def _iii(self):
+    def _iii(
+        self,
+    ):  # ! This is fundamentally non-jaxable with dynamic sizes e.g. connectivities.
         if (not self.include_self) and (self.pre_num != self.post_num):
             raise bp.ConnectorError(
                 f"We found pre_num != post_num ({self.pre_num} != {self.post_num}). "
