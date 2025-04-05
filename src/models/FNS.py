@@ -763,15 +763,3 @@ class FNS(bp.Network):
                 run, [deltas], num_parallel=num_parallel, clear_buffer=False
             )
         return res
-
-
-def create_run(
-    model, swept_params, fixed_params, monitors, duration, concrete_out=False
-):
-    def run(**swept_params):
-        m = model(**fixed_params)
-        runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
-        runner.run(duration=duration)
-        return [runner.mon[m] for m in monitors]
-
-    return run

@@ -125,3 +125,8 @@ function bpsweep(model_class, conn::Py, params::Dict, param::Pair; batch_size,
     pcat(x, y) = cat(x, y, dims = param)
     return reduce(pcat, X)
 end
+
+""" Only for jittable funcs. Each value fo params should be an interator of the same length"""
+function bpsweep(func, params::Dict; batch_size = 5, kwargs...)
+    return brainpy.running.jax_vectorize_map(func, params, num_parallel = batch_size)
+end
