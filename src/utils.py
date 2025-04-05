@@ -21,6 +21,7 @@ from brainpy._src.connect.base import get_idx_type
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
+
 def pytree_to_numpy(pytree):
     """
     Recursively traverse `pytree`, converting JAX arrays (jnp.ndarray)
@@ -34,6 +35,7 @@ def pytree_to_numpy(pytree):
             return x
 
     return jax.tree_map(convert_if_jax_array, pytree)
+
 
 def format_input(inputs):
     # Convert all elements to Tuples of (string, jnparrays)

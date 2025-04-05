@@ -486,32 +486,27 @@ class FNS(bp.Network):
 
     def _reinit_weights(self, delta, J_e):
         self.J_i = self.J_e * self.delta
-        self.key, subkey = jax.random.split(self.key)
+        self.key, *subkeys = jax.random.split(self.key, 7)
         self.E2E.proj.comm.weight = correlate_weights(
             self.E2E.proj,
             self.J_e,
             self.N_e,
-            subkey,  # ? Need to pass N_ee to keep this function jittable.
+            subkeys[0],  # ? Need to pass N_ee to keep this function jittable.
         )
-        self.key, subkey = jax.random.split(self.key)
         self.E2I.proj.comm.weight = correlate_weights(
-            self.E2I.proj, self.J_e, self.N_i, subkey
+            self.E2I.proj, self.J_e, self.N_i, subkeys[1]
         )
-        self.key, subkey = jax.random.split(self.key)
         self.I2E.proj.comm.weight = correlate_weights(
-            self.I2E.proj, self.J_i, self.N_e, subkey
+            self.I2E.proj, self.J_i, self.N_e, subkeys[2]
         )
-        self.key, subkey = jax.random.split(self.key)
         self.I2I.proj.comm.weight = correlate_weights(
-            self.I2I.proj, self.J_i, self.N_i, subkey
+            self.I2I.proj, self.J_i, self.N_i, subkeys[3]
         )
-        self.key, subkey = jax.random.split(self.key)
         self.ext2E.proj.comm.weight = correlate_weights(
-            self.ext2E.proj, self.J_e, self.N_e, subkey
+            self.ext2E.proj, self.J_e, self.N_e, subkeys[4]
         )
-        self.key, subkey = jax.random.split(self.key)
         self.ext2I.proj.comm.weight = correlate_weights(
-            self.ext2I.proj, self.J_e, self.N_i, subkey
+            self.ext2I.proj, self.J_e, self.N_i, subkeys[5]
         )
 
     def reinit_weights(self, delta=None, J_e=None):
@@ -637,6 +632,15 @@ class FNS(bp.Network):
 
         return IE_e, IE_i
 
+    def expected_sum_of_weights(self, pop="ee"):
+        if pop == "ee" or pop == "ei":
+            j = self.J_e
+        elif pop == "ie" or pop == "ii":
+            j = self.J_e * self.delta
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
+        return j * self.expected_indegree(pop)
+
     # def nu_next_thresh(self):  # !!! WROOOOONG
     #     """
     #     Calculate the minimum threshold for the product nu*n_ext to achieve spontaneous
@@ -747,7 +751,7 @@ class FNS(bp.Network):
             )
             print("Vectorizing on GPU")
             res = bp.running.jax_vectorize_map(
-                run, [deltas], num_parallel=num_parallel, clear_buffer=False
+                run, [deltas], num_parallel=num_parallel, clear_buffer=True
             )
         else:
             run = copy_run(
@@ -759,3 +763,15 @@ class FNS(bp.Network):
                 run, [deltas], num_parallel=num_parallel, clear_buffer=False
             )
         return res
+
+
+def create_run(
+    model, swept_params, fixed_params, monitors, duration, concrete_out=False
+):
+    def run(**swept_params):
+        m = model(**fixed_params)
+        runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
+        runner.run(duration=duration)
+        return [runner.mon[m] for m in monitors]
+
+    return run

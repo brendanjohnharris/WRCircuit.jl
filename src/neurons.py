@@ -244,14 +244,6 @@ class FNSNeuron(GradNeuDyn):
         V, g_K = self.integral(self.V.value, self.g_K.value, t, I, dt)
         V += self.sum_delta_inputs()  # And the delta inputs
 
-        # jax.debug.print(str(jnp.any(jnp.isnan(V)).value))
-        # jax.lax.cond(
-        #     jnp.any(jnp.isnan(V)),  # Condition
-        #     lambda _: nanerror(),  # If True, raise an error
-        #     lambda _: None,  # If False, do nothing
-        #     operand=None,
-        # )
-
         # refractory period
         refractory = (t - self.t_last_spike) <= self.tau_ref
         V = bm.where(refractory, self.V.value, V)
