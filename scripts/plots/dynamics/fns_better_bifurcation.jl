@@ -61,24 +61,26 @@ end
 begin # * Load stats
     load_stats, sweep_parameters, fixed_parameters = Dewdrop.stats.load("fns_better_bifurcation.pickle")
 end
-begin # * Extract a ToolsArray of one statistic
-    deltas = sweep_parameters["delta"] |> convert2(Array)
-    nus = sweep_parameters["nu"] |> convert2(Array)
-    deltas = reshape(deltas, (length(unique(deltas)), length(unique(nus))))
-    nus = reshape(nus, (length(unique(deltas)), length(unique(nus))))
-    rate = load_stats["rate"]["E.spike"] |> convert2(Array)
-    rate = reshape(rate, size(deltas)..., size(rate, 2))
-    meanrate = dropdims(mean(rate, dims = 3), dims = 3)
-end
 begin
-    f = Figure()
-    ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "ν")
-    colorrange = extrema(meanrate)
-    heatmap!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colorrange,
-             colormap = :viridis)
-    Colorbar(f[1, 2]; colormap = :viridis, colorrange,
-             label = "mean rate (Hz)")
-    f
+    begin # * Extract a ToolsArray of one statistic
+        deltas = sweep_parameters["delta"] |> convert2(Array)
+        nus = sweep_parameters["nu"] |> convert2(Array)
+        deltas = reshape(deltas, (length(unique(deltas)), length(unique(nus))))
+        nus = reshape(nus, (length(unique(deltas)), length(unique(nus))))
+        rate = load_stats["rate"]["E.spike"] |> convert2(Array)
+        rate = reshape(rate, size(deltas)..., size(rate, 2))
+        meanrate = dropdims(mean(rate, dims = 3), dims = 3)
+    end
+    begin
+        f = Figure()
+        ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "ν")
+        colorrange = extrema(meanrate)
+        heatmap!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colorrange,
+                 colormap = :viridis)
+        Colorbar(f[1, 2]; colormap = :viridis, colorrange,
+                 label = "mean rate (Hz)")
+        f
+    end
 end
 # begin
 #     f = Figure(size = (800, 600))

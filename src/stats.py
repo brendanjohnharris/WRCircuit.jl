@@ -284,3 +284,27 @@ def grand_distribution(nbins):
         return hist, bin_centers
 
     return _grand_distribution
+
+
+def mua(bin, dt=bp.share["dt"]):
+    """
+    Calculate the multi-unit activity (MUA) of a neuron given its spike train. If 'spikes' is not a boolean array, return an array of nans. Should be jax compatible.
+    """
+
+    @jax.jit
+    def _mua(spikes):
+        # * If spikes is not a boolean array, return an array of nans
+        if spikes.dtype != bool:
+            return jnp.full(spikes.shape[0], np.nan)  # Drop the neuron axis
+
+        # * Bin over time
+        if bin is not None:
+            bin_size = int(bin / dt)
+            spikes = coarsegrain(spikes, bin_size, axis=0)  # Coarse grain over time
+
+        mua = jnp.sum(spikes, axis=1)  # Sum over neurons
+
+        times = jnp.arange(spikes.shape[0]) * dt
+        return mua, times
+
+    return _mua
