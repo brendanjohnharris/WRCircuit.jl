@@ -18,15 +18,13 @@ begin # * Python imports
     const models = PythonCall.pynew()
     const running = PythonCall.pynew()
     const utils = PythonCall.pynew()
+    const stats = PythonCall.pynew()
     const distances = PythonCall.pynew()
     const jax = PythonCall.pynew()
     const jax_lib = PythonCall.pynew()
     const xla_bridge = PythonCall.pynew()
     const numpy = PythonCall.pynew()
     const gc = PythonCall.pynew()
-
-    export brainpy, neurons, positions, synapses, models, running, utils, distances, numpy,
-           jax
 end
 
 function __init__()
@@ -49,6 +47,7 @@ function __init__()
     pycopy!(models, pyimport("src.models"))
     pycopy!(running, pyimport("src.running"))
     pycopy!(utils, pyimport("src.utils"))
+    pycopy!(stats, pyimport("src.stats"))
     pycopy!(distances, pyimport("src.distances"))
     pycopy!(numpy, pyimport("numpy"))
     pycopy!(gc, pyimport("gc"))

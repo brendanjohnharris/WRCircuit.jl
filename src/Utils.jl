@@ -4,7 +4,7 @@ using StatsBase
 using Random
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts, timebins, unitarylfp, to_ms
+       structurefunction, histcounts, timebins, unitarylfp, to_ms, pytree2dict
 
 function _preamble()
     quote
@@ -225,4 +225,32 @@ function unitarylfp(times, spikes, spike_type;
     weighted = amps .* exp_mat
     x = vec(sum(weighted, dims = 1))
     return TimeseriesTools.TimeSeries(times .* u"ms", x)
+end
+
+# * Working with 'pytrees'
+function pytree2dict(d::Dict)
+    d = deepcopy(d)
+    for (k, v) in d
+        if k isa Py
+            _k = pyconvert(String, k)
+            delete!(d, k)
+            k = _k
+        end
+        if v isa Dict
+            d[k] = pytree2dict(v)
+        elseif string(pytype(v)) == "<class 'dict'>"
+            d[k] = pytree2dict(Dict{Any, Any}(PyDict(v)))
+        elseif string(pytype(v)) == "<class 'tuple'>"
+            d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'numpy.ndarray'>"
+            d[k] = pyconvert(Array, v)
+        else
+            d[k] = v
+        end
+    end
+    return d
+end
+function pytree2dict(d::Py)
+    d = Dict{Any, Any}(PyDict(d))
+    return pytree2dict(d)
 end

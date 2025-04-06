@@ -37,6 +37,7 @@ from ..distances import *
 from ..neurons import FNSNeuron
 from ..positions import *
 from ..synapses import *
+from ..stats import *
 
 
 class SingleNeuron(bp.Network):
