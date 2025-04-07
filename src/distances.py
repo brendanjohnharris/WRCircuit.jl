@@ -57,7 +57,7 @@ class DistanceDependent(TwoEndConnector):
         positions_post=None,
         boundary="periodic",
         distance_metric=euclidean_distance,
-        include_self=False,
+        include_self=True,
         seed=None,
         **kwargs,
     ):

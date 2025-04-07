@@ -34,7 +34,7 @@ from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..utils import *
 from ..distances import *
-from ..neurons import FNSNeuron
+from ..neurons import FNSNeuron, PoissonGroup
 from ..positions import *
 from ..synapses import *
 from ..stats import *
@@ -105,7 +105,6 @@ class DisconnectedFNS(bp.Network):
     def __init__(
         self,
         N_e=30000,  # Number of Exc. neurons
-        include_self=False,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
@@ -115,7 +114,6 @@ class DisconnectedFNS(bp.Network):
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
     ):
         super().__init__()
-        self.include_self = include_self
         self.gamma = gamma
         self.delta = delta
         self.nu = nu
@@ -223,54 +221,6 @@ class DisconnectedFNS(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
 
-class PoissonGroup(bp.dyn.NeuDyn):
-    def __init__(
-        self,
-        size: Shape,
-        freqs: Union[int, float, jax.Array, bm.Array, Callable],
-        keep_size: bool = False,
-        sharding: Optional[Sequence[str]] = None,
-        spk_type: Optional[type] = None,
-        name: Optional[str] = None,
-        mode: Optional[bm.Mode] = None,
-        seed: Union[int, jnp.ndarray] = 42,
-    ):
-        super().__init__(
-            size=size, sharding=sharding, name=name, keep_size=keep_size, mode=mode
-        )
-        # parameters
-        self.freqs = parameter(freqs, self.num, allow_none=False)
-        self.spk_type = get_spk_type(spk_type, self.mode)
-
-        # Make the seed a brainpy variable so it's tracked in JAX transformations.
-        # Just convert to a PRNGKey if you want to allow integer seeds.
-        if isinstance(seed, int):
-            seed = jax.random.PRNGKey(seed)
-        self.seed = self.init_variable(
-            lambda shape: seed,  # must accept one argument for shape
-            shape=seed.shape,  # the shape is (2,)
-            batch_or_mode=None,
-        )
-
-        # variables
-        self.reset_state(self.mode)
-
-    def update(self):
-        key, subkey = jax.random.split(self.seed.value)  # ! Super slow...
-        self.seed.value = key
-        spikes = jax.random.uniform(
-            subkey, shape=self.spike.shape, dtype=jnp.float32
-        ) <= (self.freqs * bp.share["dt"] / 1000.0)
-
-        self.spike.value = spikes
-        return spikes
-
-    def reset_state(self, batch_or_mode=None, **kwargs):
-        self.spike = self.init_variable(
-            partial(jnp.zeros, dtype=self.spk_type), batch_or_mode
-        )
-
-
 class FNS(bp.Network):
     """
     A spatially independent network of FNS neurons.
@@ -279,11 +229,10 @@ class FNS(bp.Network):
     def __init__(
         self,
         N_e=30000,  # Number of Exc. neurons
-        omega_ee=0.1,  # Total 'mass' of connectivity probability (proportional to num. synapses)
-        omega_ei=0.2,
-        omega_ie=0.3,
-        omega_ii=0.3,
-        include_self=False,
+        K_ee=72,  # Total 'mass' of connectivity probability (proportional to num. synapses)
+        K_ei=88,
+        K_ie=28,
+        K_ii=39,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
@@ -294,23 +243,25 @@ class FNS(bp.Network):
         copy_conn=False,  # Whether to copy connectivity from the provided network
     ):
         super().__init__()
-        self.omega_ee = omega_ee
-        self.omega_ei = omega_ei
-        self.omega_ie = omega_ie
-        self.omega_ii = omega_ii
-        self.include_self = include_self
         self.gamma = gamma
         self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
         self.J_e = J_e
-        self.J_i = (
-            self.J_e * delta
-        )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
+        self.J_i = self.J_e * delta
         self.method = method
         self.key = key
         self.N_e = N_e
         self.N_i = N_e // gamma
+
+        self.K_ee = K_ee
+        self.K_ei = K_ei
+        self.K_ie = K_ie
+        self.K_ii = K_ii
+        self.omega_ee = self.required_omega("ee")
+        self.omega_ie = self.required_omega("ie")
+        self.omega_ei = self.required_omega("ei")
+        self.omega_ii = self.required_omega("ii")
 
         self.key, subkey = jax.random.split(self.key)
         exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
@@ -409,7 +360,7 @@ class FNS(bp.Network):
             V_rev=V_rev_e,
         )
 
-        self.key, subkey = jax.random.split(self.key)
+        # self.key, subkey = jax.random.split(self.key)
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
@@ -559,7 +510,6 @@ class FNS(bp.Network):
             "omega_ei",
             "omega_ie",
             "omega_ii",
-            "include_self",
             "gamma",
             "delta",
             "nu",
@@ -580,15 +530,28 @@ class FNS(bp.Network):
         """
         if pop == "ee":
             # Subtract 1 if self-connections are excluded
-            adjustment = 0 if self.include_self else 1 / self.N_e
-            return self.N_e * self.omega_ee - adjustment
+            return self.N_e * self.omega_ee
         elif pop == "ei":
             return self.N_e * self.omega_ei
         elif pop == "ie":
             return self.N_i * self.omega_ie
         elif pop == "ii":
-            adjustment = 0 if self.include_self else 1 / self.N_i
-            return self.N_i * self.omega_ii - adjustment
+            return self.N_i * self.omega_ii
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
+
+    def required_omega(self, pop):
+        """
+        Calculate the expected in-degree for a given population.
+        """
+        if pop == "ee":
+            return self.K_ee / self.N_e
+        elif pop == "ei":
+            return self.K_ei / self.N_e
+        elif pop == "ie":
+            return self.K_ie / self.N_i
+        elif pop == "ii":
+            return self.K_ii / self.N_i
         else:
             raise ValueError(f"Unknown population connection type: {pop}")
 

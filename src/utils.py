@@ -138,4 +138,3 @@ class CSRConn(TwoEndConnector):
         #         f"the maximum id ({self.max_post}) of self.post_ids."
         #     )
         return self.indices, self.inptr
-

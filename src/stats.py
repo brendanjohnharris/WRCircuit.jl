@@ -22,6 +22,10 @@ from brainpy.types import ArrayType
 from functools import partial
 
 
+@partial(
+    jax.jit,
+    static_argnames=["fixed_params", "duration", "transient", "concrete_out"],
+)
 def create_run(
     model, fixed_params, monitors, duration, transient=0.0, concrete_out=False
 ):
@@ -304,7 +308,6 @@ def mua(bin, dt=bp.share["dt"]):
 
         mua = jnp.sum(spikes, axis=1)  # Sum over neurons
 
-        times = jnp.arange(spikes.shape[0]) * dt
-        return mua, times
+        return mua
 
     return _mua

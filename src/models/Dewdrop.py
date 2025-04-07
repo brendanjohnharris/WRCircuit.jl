@@ -32,7 +32,7 @@ from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..utils import *
 from ..distances import *
-from ..neurons import FNSNeuron
+from ..neurons import FNSNeuron, PoissonGroup
 from ..positions import *
 from ..synapses import *
 
@@ -51,12 +51,11 @@ class Dewdrop(bp.Network):
         sigma_ei=0.1,
         sigma_ie=0.1,
         sigma_ii=0.125,
-        omega_ee=0.1,  # Total 'mass' of connectivity probability (proportional to num. synapses)
-        omega_ei=0.2,
-        omega_ie=0.3,
-        omega_ii=0.3,
+        K_ee=72,
+        K_ei=88,
+        K_ie=28,
+        K_ii=39,
         boundary="periodic",
-        include_self=False,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
@@ -75,27 +74,30 @@ class Dewdrop(bp.Network):
         self.sigma_ei = sigma_ei
         self.sigma_ie = sigma_ie
         self.sigma_ii = sigma_ii
-        self.omega_ee = omega_ee
-        self.omega_ei = omega_ei
-        self.omega_ie = omega_ie
-        self.omega_ii = omega_ii
-        self.p_ee = kernel.mass2pmax(omega_ee, sigma_ee)
-        self.p_ei = kernel.mass2pmax(omega_ei, sigma_ei)
-        self.p_ie = kernel.mass2pmax(omega_ie, sigma_ie)
-        self.p_ii = kernel.mass2pmax(omega_ii, sigma_ii)
         self.boundary = boundary
-        self.include_self = include_self
         self.gamma = gamma
         self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
         self.J_e = J_e
-        self.J_i = (
-            self.J_e * delta
-        )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
+        self.J_i = self.J_e * delta
         self.method = method
         self.kernel = kernel
         self.key = key
+
+        self.K_ee = K_ee
+        self.K_ei = K_ei
+        self.K_ie = K_ie
+        self.K_ii = K_ii
+
+        self.omega_ee = self.required_omega("ee")
+        self.omega_ei = self.required_omega("ei")
+        self.omega_ie = self.required_omega("ie")
+        self.omega_ii = self.required_omega("ii")
+        self.p_ee = kernel.mass2pmax(self.omega_ee, self.sigma_ee)
+        self.p_ei = kernel.mass2pmax(self.omega_ei, self.sigma_ei)
+        self.p_ie = kernel.mass2pmax(self.omega_ie, self.sigma_ie)
+        self.p_ii = kernel.mass2pmax(self.omega_ii, self.sigma_ii)
 
         # geometry
         A = dx**2
@@ -181,7 +183,6 @@ class Dewdrop(bp.Network):
                 positions_pre=self.E.positions,
                 positions_post=self.E.positions,
                 boundary=boundary,
-                include_self=include_self,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -191,7 +192,6 @@ class Dewdrop(bp.Network):
                 positions_pre=self.E.positions,
                 positions_post=self.I.positions,
                 boundary=boundary,
-                include_self=include_self,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -201,7 +201,6 @@ class Dewdrop(bp.Network):
                 positions_pre=self.I.positions,
                 positions_post=self.E.positions,
                 boundary=boundary,
-                include_self=include_self,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -211,18 +210,13 @@ class Dewdrop(bp.Network):
                 positions_pre=self.I.positions,
                 positions_post=self.I.positions,
                 boundary=boundary,
-                include_self=include_self,
                 seed=subkey,
             )
 
             self.key, subkey = jax.random.split(self.key)
-            conn_exte = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
+            conn_exte = FixedProb(prob=p_ext, seed=subkey)
             self.key, subkey = jax.random.split(self.key)
-            conn_exti = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
+            conn_exti = FixedProb(prob=p_ext, seed=subkey)
 
             self.N_e = self.E.size
             self.N_i = self.I.size
@@ -244,7 +238,7 @@ class Dewdrop(bp.Network):
             V_rev=V_rev_e,
         )
 
-        self.key, subkey = jax.random.split(self.key)
+        # self.key, subkey = jax.random.split(self.key)
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
@@ -280,7 +274,7 @@ class Dewdrop(bp.Network):
 
         # External population
         self.key, subkey = jax.random.split(self.key)
-        self.ext = bp.dyn.PoissonGroup(
+        self.ext = PoissonGroup(
             size=N_ext,
             freqs=self.nu,
             keep_size=False,
@@ -318,7 +312,7 @@ class Dewdrop(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.delta, self.J_e)  # !! Need to fix it seems
+        self.reinit_weights(self.delta, self.J_e)
 
     def reinit_weights(self, delta=None, J_e=None):
         if delta is not None:
@@ -400,7 +394,6 @@ class Dewdrop(bp.Network):
             "sigma_ie",
             "sigma_ii",
             "boundary",
-            "include_self",
             "gamma",
             "delta",
             "nu",
@@ -462,6 +455,21 @@ class Dewdrop(bp.Network):
             )
 
         return rho * result
+
+    def required_omega(self, pop):
+        """
+        Calculate the expected omega for a given population.
+        """
+        if pop == "ee":
+            return self.K_ee / self.rho
+        elif pop == "ei":
+            return self.K_ei / self.rho
+        elif pop == "ie":
+            return self.K_ie / (self.rho / self.gamma)
+        elif pop == "ii":
+            return self.K_ii / (self.rho / self.gamma)
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
 
     def calculate_zeta(self):
         """
@@ -582,16 +590,15 @@ class Dewdrop(bp.Network):
             "sigma_ei",
             "sigma_ie",
             "sigma_ii",
-            "omega_ee",
-            "omega_ei",
-            "omega_ie",
-            "omega_ii",
+            "K_ee",
+            "K_ei",
+            "K_ie",
+            "K_ii",
             "p_ee",
             "p_ei",
             "p_ie",
             "p_ii",
             "boundary",
-            "include_self",
             "gamma",
             "g",
             "nu",
