@@ -228,7 +228,7 @@ class FNS(bp.Network):
 
     def __init__(
         self,
-        N_e=30000,  # Number of Exc. neurons
+        N_e=4000,  # Number of Exc. neurons
         K_ee=72,  # Total 'mass' of connectivity probability (proportional to num. synapses)
         K_ei=88,
         K_ie=28,

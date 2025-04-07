@@ -197,8 +197,10 @@ class DistanceDependent(TwoEndConnector):
         for start in range(0, num_pre, CHUNK_SIZE):
             pre_chunk = self.positions_pre[start : start + CHUNK_SIZE]
             key, connections, counts = process_chunk_inner(pre_chunk, key, start)
-            # --- IMPORTANT: Do the nonzero (jnp.where) outside the JIT to avoid dynamic shape issues.
+
+            # --- IMPORTANT: This is the issue here...
             chunk_pre_idx, chunk_post_idx = jnp.where(connections)
+
             global_pre_idx = (
                 chunk_pre_idx + start
             )  # convert local (chunk) row indices to global ones
@@ -344,7 +346,7 @@ class FixedProb(TwoEndConnector):
 
     def _iii(
         self,
-    ):  # ! This is fundamentally non-jaxable with dynamic sizes e.g. connectivities.
+    ):
         if (not self.include_self) and (self.pre_num != self.post_num):
             raise bp.ConnectorError(
                 f"We found pre_num != post_num ({self.pre_num} != {self.post_num}). "

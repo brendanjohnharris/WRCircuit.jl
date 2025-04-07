@@ -222,6 +222,8 @@ class Dewdrop(bp.Network):
             self.N_i = self.I.size
 
         # Synapses
+        tau_r_e = 1.0
+        tau_r_i = 1.0
         tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
         tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
@@ -233,7 +235,7 @@ class Dewdrop(bp.Network):
             delay=2.0,
             conn=conn_ee,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=tau_r_e,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
@@ -245,7 +247,7 @@ class Dewdrop(bp.Network):
             delay=2.0,
             conn=conn_ei,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=tau_r_e,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
@@ -256,7 +258,7 @@ class Dewdrop(bp.Network):
             delay=2.0,
             conn=conn_ie,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=tau_r_i,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
@@ -267,7 +269,7 @@ class Dewdrop(bp.Network):
             delay=2.0,
             conn=conn_ii,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=tau_r_i,
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )

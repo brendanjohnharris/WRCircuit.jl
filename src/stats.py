@@ -22,19 +22,25 @@ from brainpy.types import ArrayType
 from functools import partial
 
 
-@partial(
-    jax.jit,
-    static_argnames=["fixed_params", "duration", "transient", "concrete_out"],
-)
+# @partial(
+#     jax.jit,  # ! Make sure fixed_params is a frozenset e.g. frozenset(dict.items())
+#     static_argnames=["fixed_params", "duration", "transient", "concrete_out"],
+# )
 def create_run(
-    model, fixed_params, monitors, duration, transient=0.0, concrete_out=False
+    model,
+    fixed_params,
+    monitors,
+    duration,
+    transient=0.0,
+    concrete_out=False,
 ):
 
     transient_idx = int(transient / bp.share["dt"])
 
-    @jax.jit
-    def run(swept_params):
-        m = model(**fixed_params, **swept_params)
+    # Be cautious; static_params must be hashable, so, use e.g. frozenset(dict.items())
+    @partial(jax.jit, static_argnames=("static_params"))
+    def run(swept_params, static_params=None):
+        m = model(**fixed_params, **swept_params, **static_params)
         runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
         runner.run(duration=duration)
         return {m: runner.mon[m][transient_idx:, :] for m in monitors}
@@ -50,9 +56,9 @@ def create_stats_run(run, stats):
     statistic. Assuems you are using the bp.share["dt"]
     """
 
-    @jax.jit
-    def stats_run(swept_params):  # ! change this to NOT vmap, and vmap OUTSIDE
-        results = run(swept_params)  # Dict of monitor outputs
+    @partial(jax.jit, static_argnames=("static_params"))
+    def stats_run(swept_params, static_params=None):
+        results = run(swept_params, static_params)  # Dict of monitor outputs
         calc_stats = {key: jax.tree_map(func, results) for key, func in stats.items()}
         return calc_stats
 
@@ -152,7 +158,7 @@ def progress_vmap(
     return _vmap
 
 
-@partial(jax.jit, static_argnames=["bin_size", "axis"])
+@partial(jax.jit, static_argnames=("bin_size", "axis"))
 def coarsegrain(spikes, bin_size, axis=0):
     # Move the specified axis to the front
     spikes = jnp.moveaxis(spikes, axis, 0)
