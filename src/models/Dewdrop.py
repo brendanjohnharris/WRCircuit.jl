@@ -174,8 +174,13 @@ class Dewdrop(bp.Network):
             self.N_i = copy_conn["N_i"]
 
         else:
+            self.N_e = self.E.size
+            self.N_i = self.I.size
+            ne = self.E.size[0] * self.E.size[1]
+            ni = self.I.size[0]  # 1 element
             self.key, subkey = jax.random.split(self.key)
             conn_ee = DistanceDependent(
+                num_connections=self.K_ee * ne,  # Freezes total connections
                 kernel=kernel(sigma=self.sigma_ee, p_max=self.p_ee),
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
@@ -184,6 +189,7 @@ class Dewdrop(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ei = DistanceDependent(
+                num_connections=self.K_ei * ne,
                 kernel=kernel(sigma=self.sigma_ei, p_max=self.p_ei),
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
@@ -192,6 +198,7 @@ class Dewdrop(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ie = DistanceDependent(
+                num_connections=self.K_ie * ni,
                 kernel=kernel(sigma=self.sigma_ie, p_max=self.p_ie),
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
@@ -200,6 +207,7 @@ class Dewdrop(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ii = DistanceDependent(
+                num_connections=self.K_ii * ni,
                 kernel=kernel(sigma=self.sigma_ii, p_max=self.p_ii),
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
@@ -211,9 +219,6 @@ class Dewdrop(bp.Network):
             conn_exte = FixedProb(prob=p_ext, seed=subkey)
             self.key, subkey = jax.random.split(self.key)
             conn_exti = FixedProb(prob=p_ext, seed=subkey)
-
-            self.N_e = self.E.size
-            self.N_i = self.I.size
 
         # Synapses
         tau_r_e = 1.0
