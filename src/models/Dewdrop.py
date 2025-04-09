@@ -55,12 +55,11 @@ class Dewdrop(bp.Network):
         K_ei=88,
         K_ie=28,
         K_ii=39,
-        boundary="periodic",
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=1,  # External population firing rate
         n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,  # ! Currently abitrary. Has same units as g_L? uS
+        J_e=0.0008,
         kernel=GaussianKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
@@ -74,7 +73,6 @@ class Dewdrop(bp.Network):
         self.sigma_ei = sigma_ei
         self.sigma_ie = sigma_ie
         self.sigma_ii = sigma_ii
-        self.boundary = boundary
         self.gamma = gamma
         self.delta = delta
         self.nu = nu
@@ -182,7 +180,6 @@ class Dewdrop(bp.Network):
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
                 positions_post=self.E.positions,
-                boundary=boundary,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -191,7 +188,6 @@ class Dewdrop(bp.Network):
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
                 positions_post=self.I.positions,
-                boundary=boundary,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -200,7 +196,6 @@ class Dewdrop(bp.Network):
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
                 positions_post=self.E.positions,
-                boundary=boundary,
                 seed=subkey,
             )
             self.key, subkey = jax.random.split(self.key)
@@ -209,7 +204,6 @@ class Dewdrop(bp.Network):
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
                 positions_post=self.I.positions,
-                boundary=boundary,
                 seed=subkey,
             )
 
@@ -395,7 +389,6 @@ class Dewdrop(bp.Network):
             "sigma_ei",
             "sigma_ie",
             "sigma_ii",
-            "boundary",
             "gamma",
             "delta",
             "nu",
@@ -417,7 +410,6 @@ class Dewdrop(bp.Network):
         Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large
         dx/small sigma.
         """
-        assert self.boundary == "periodic"
         dx = self.dx
         if pop[0] == "e":
             rho = self.rho
@@ -600,7 +592,6 @@ class Dewdrop(bp.Network):
             "p_ei",
             "p_ie",
             "p_ii",
-            "boundary",
             "gamma",
             "g",
             "nu",

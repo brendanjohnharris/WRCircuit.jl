@@ -37,14 +37,10 @@ class DistanceDependent(TwoEndConnector):
         If not provided, defaults to positions_pre.
     domain : array-like, optional
         Size of the domain in each dimension, used for boundary conditions.
-    boundary : str, optional
-        Type of boundary conditions ('periodic', 'reflecting', 'absorbing').
     distance_metric : callable
         The distance metric to use, a function of two positions.
     kernel : callable
         The function defining the probability of connection based on distance.
-    include_self : bool, optional
-        Whether to include self-connections.
     seed : int, optional
         Random seed.
     """
@@ -55,9 +51,7 @@ class DistanceDependent(TwoEndConnector):
         domain,
         positions_pre,
         positions_post=None,
-        boundary="periodic",
         distance_metric=euclidean_distance,
-        include_self=True,
         seed=None,
         **kwargs,
     ):
@@ -72,12 +66,6 @@ class DistanceDependent(TwoEndConnector):
         self.dimensions = self.positions_pre.shape[1]
         self.domain = jnp.asarray(domain)
 
-        boundary_codes = {"periodic": 0, "reflecting": 1, "absorbing": 2}
-        if boundary not in boundary_codes:
-            raise ValueError(f"Unsupported boundary condition: {boundary}")
-        self.boundary_code = boundary_codes[boundary]
-        self.boundary = boundary  # For representation
-
         if distance_metric is None:
             raise ValueError("A distance metric function must be specified.")
         self.distance_metric = distance_metric
@@ -86,19 +74,19 @@ class DistanceDependent(TwoEndConnector):
             raise ValueError("A kernel function must be specified.")
         self.kernel = kernel
 
-        self.include_self = include_self
         if seed is not None:
             self.key = seed
         else:
             self.key = jax.random.PRNGKey(np.random.randint(0, 2**32))
 
     def build_csr(self):
+        # * So we need to deterministically generate a pre_num_to_select and
+        #   post_num_to_select. These determine the size fo the csr arrays
+
         # -------------------------------------------------------------------------
         # Helper: Compute distance with different boundary adjustments.
-        @partial(jit, static_argnums=(2, 3))
-        def compute_distance_with_boundary(
-            pos_pre, pos_post, boundary_code, distance_metric
-        ):
+        # @partial(jit, static_argnums=(2, 3))
+        def compute_distance_with_boundary(pos_pre, pos_post, distance_metric):
             # Compute differences
             delta = pos_pre - pos_post
 
@@ -109,52 +97,23 @@ class DistanceDependent(TwoEndConnector):
             adjusted_pos_pre_periodic = pos_post + delta_periodic
             dist_periodic = distance_metric(adjusted_pos_pre_periodic, pos_post)
 
-            # Reflecting boundary adjustment
-            adjusted_pos_pre_reflecting = jnp.clip(pos_pre, 0, self.domain)
-            adjusted_pos_post_reflecting = jnp.clip(pos_post, 0, self.domain)
-            dist_reflecting = distance_metric(
-                adjusted_pos_pre_reflecting, adjusted_pos_post_reflecting
-            )
-
-            # Absorbing boundary adjustment
-            outside_pre = (pos_pre < 0) | (pos_pre > self.domain)
-            outside_post = (pos_post < 0) | (pos_post > self.domain)
-            outside = jnp.any(outside_pre) | jnp.any(outside_post)
-            dist_absorbing = jnp.where(
-                outside, jnp.inf, distance_metric(pos_pre, pos_post)
-            )
-
-            # No boundary adjustment
-            dist_none = distance_metric(pos_pre, pos_post)
-
-            distances = jnp.stack(
-                [dist_periodic, dist_reflecting, dist_absorbing, dist_none]
-            )
-            return distances[boundary_code]
+            return dist_periodic
 
         # -------------------------------------------------------------------------
         # Helper: Compute distances from one pre–neuron to all post–neurons.
         def compute_row_distances(pos_pre):
             return vmap(
                 lambda pos_post: compute_distance_with_boundary(
-                    pos_pre, pos_post, self.boundary_code, self.distance_metric
+                    pos_pre, pos_post, self.distance_metric
                 )
             )(self.positions_post)
 
         # -------------------------------------------------------------------------
-        # To help JIT compilation, capture some attributes as local variables.
-        include_self = self.include_self
-        num_pre_neurons = self.num_pre_neurons
-        num_post_neurons = self.num_post_neurons
-        domain = (
-            self.domain
-        )  # if needed inside compute_distance (already used via self)
-
-        # -------------------------------------------------------------------------
         # Jitted inner function: process a chunk of pre–neurons.
         # (Note: We removed the jnp.where for the connections indices from inside the JIT.)
-        @partial(jit, static_argnums=(2,))
-        def process_chunk_inner(pre_chunk, key, start):
+        # @partial(jit, static_argnums=(2,))
+        @jax.jit
+        def process_chunk_inner(pre_chunk, key):
             # Compute distances for all rows in this chunk (via double vmap)
             distances = vmap(compute_row_distances)(
                 pre_chunk
@@ -163,20 +122,6 @@ class DistanceDependent(TwoEndConnector):
             key, subkey = jax.random.split(key)
             rand_vals = jax.random.uniform(subkey, shape=probs.shape)
             connections = probs > rand_vals
-
-            # Remove self–connections if needed.
-            if not include_self:
-                # For each row in the chunk, the global index is start + row_index.
-                chunk_len = pre_chunk.shape[0]
-                global_indices = jnp.arange(start, start + chunk_len)
-                min_neurons = jnp.minimum(num_pre_neurons, num_post_neurons)
-                rows = jnp.arange(chunk_len)
-                new_vals = jnp.where(
-                    global_indices < min_neurons,
-                    False,
-                    connections[rows, global_indices],
-                )
-                connections = connections.at[rows, global_indices].set(new_vals)
 
             counts = jnp.sum(
                 connections, axis=1
@@ -196,7 +141,7 @@ class DistanceDependent(TwoEndConnector):
         # Process each chunk sequentially.
         for start in range(0, num_pre, CHUNK_SIZE):
             pre_chunk = self.positions_pre[start : start + CHUNK_SIZE]
-            key, connections, counts = process_chunk_inner(pre_chunk, key, start)
+            key, connections, counts = process_chunk_inner(pre_chunk, key)
 
             # --- IMPORTANT: This is the issue here...
             chunk_pre_idx, chunk_post_idx = jnp.where(connections)
@@ -221,11 +166,6 @@ class DistanceDependent(TwoEndConnector):
 
         # Cast the indices to the desired index type and return.
         return post_ids.astype(get_idx_type()), indptr.astype(get_idx_type())
-
-    def to_dict(self, keys=["boundary", "include_self"]):
-        out = {key: value for key, value in self.__dict__.items() if key in keys}
-        out["kernel"] = {self.kernel.__class__.__name__: self.kernel.to_dict()}
-        return out
 
 
 class AbstractKernel(ABC):
