@@ -33,7 +33,6 @@ def create_run(
 
     transient_idx = int(transient / bp.share["dt"])
 
-    @jax.jit
     def run(swept_params):
         m = model(**fixed_params, **swept_params)
         runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
@@ -51,7 +50,6 @@ def create_stats_run(run, stats):
     statistic. Assuems you are using the bp.share["dt"]
     """
 
-    @jax.jit
     def stats_run(swept_params):
         results = run(swept_params)  # Dict of monitor outputs
         calc_stats = {key: jax.tree_map(func, results) for key, func in stats.items()}
@@ -198,8 +196,6 @@ def partial_vmap(
             for k, v in static_args.items():
                 sample_static[k] = v[i].item()
 
-            print(sample_static)
-
             # Check if this combination already exists in a group
             found_group = False
             for group_idx, existing_static in group_static.items():
@@ -238,7 +234,6 @@ def partial_vmap(
             group_dynamic = {k: v[indices] for k, v in dynamic_args.items()}
 
             # Define function with static args baked in
-            @jax.jit
             def run_with_static(dyn_args):
                 return func({**dyn_args, **static_vals})
 
@@ -248,8 +243,8 @@ def partial_vmap(
             # Process in batches
             group_batch_results = []
             for i in trange(0, len(indices), batch_size):
-                if clear_buffer:  # ? Why??
-                    vfunc = vmap(run_with_static, in_axes=in_axes)
+                # if clear_buffer:  # ? Why??
+                #     vfunc = vmap(run_with_static, in_axes=in_axes)
 
                 # Slice the batch
                 batch_args = {

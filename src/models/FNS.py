@@ -251,6 +251,7 @@ class FNS(bp.Network):
         self.J_i = self.J_e * delta
         self.method = method
         self.key = key
+
         self.N_e = N_e
         self.N_i = N_e // gamma
 
