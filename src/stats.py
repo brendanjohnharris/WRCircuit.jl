@@ -11,7 +11,7 @@ from jax import jit, vmap
 from jax import lax
 import copy
 import os
-from tqdm import trange
+from tqdm import trange, tqdm
 
 import json
 import pickle
@@ -22,10 +22,6 @@ from brainpy.types import ArrayType
 from functools import partial
 
 
-# @partial(
-#     jax.jit,  # ! Make sure fixed_params is a frozenset e.g. frozenset(dict.items())
-#     static_argnames=["fixed_params", "duration", "transient", "concrete_out"],
-# )
 def create_run(
     model,
     fixed_params,
@@ -37,10 +33,9 @@ def create_run(
 
     transient_idx = int(transient / bp.share["dt"])
 
-    # Be cautious; static_params must be hashable, so, use e.g. frozenset(dict.items())
-    @partial(jax.jit, static_argnames=("static_params"))
-    def run(swept_params, static_params=None):
-        m = model(**fixed_params, **swept_params, **static_params)
+    @jax.jit
+    def run(swept_params):
+        m = model(**fixed_params, **swept_params)
         runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
         runner.run(duration=duration)
         return {m: runner.mon[m][transient_idx:, :] for m in monitors}
@@ -56,9 +51,9 @@ def create_stats_run(run, stats):
     statistic. Assuems you are using the bp.share["dt"]
     """
 
-    @partial(jax.jit, static_argnames=("static_params"))
-    def stats_run(swept_params, static_params=None):
-        results = run(swept_params, static_params)  # Dict of monitor outputs
+    @jax.jit
+    def stats_run(swept_params):
+        results = run(swept_params)  # Dict of monitor outputs
         calc_stats = {key: jax.tree_map(func, results) for key, func in stats.items()}
         return calc_stats
 
@@ -80,6 +75,7 @@ def load(file):
 def progress_vmap(
     func: callable,
     batch_size: int,
+    in_axes=0,
     clear_buffer: bool = True,
 ):
     def _vmap(arguments: Union[Dict[str, ArrayType], Sequence[ArrayType]]):
@@ -106,13 +102,14 @@ def progress_vmap(
         n_samples = lengths[0]
 
         # Create vmapped function - define once
-        vfunc = vmap(func)
+        vfunc = vmap(func, in_axes=in_axes)
 
         # Process in batches
         all_batch_results = []
         res_tree = None
 
         for i in trange(0, n_samples, batch_size):
+            # * Do we need to regenerate the vfunc each loop?
             # Create batch
             batch_slice = [ele[i : i + batch_size] for ele in flat_args]
             batch_args = jax.tree.unflatten(tree_def, batch_slice)
@@ -153,6 +150,169 @@ def progress_vmap(
             bm.clear_buffer_memory()
 
         # Return reconstructed result
+        return jax.tree.unflatten(res_tree, final_values), arguments
+
+    return _vmap
+
+
+from typing import Union, Sequence, Dict, List, Any
+
+ArrayType = Any  # For simplicity
+
+
+def partial_vmap(
+    func: callable,
+    batch_size: int,
+    static_argnames: List[str],
+    in_axes=0,
+    clear_buffer: bool = True,
+):
+    def _vmap(arguments: Dict[str, ArrayType]):
+        if not isinstance(arguments, dict):
+            raise TypeError("partial_vmap requires a dictionary of arguments")
+
+        # Convert inputs to the appropriate array type
+        array_func = np.array if clear_buffer else jnp.array
+        arguments = jax.tree.map(array_func, arguments)
+
+        # Split into dynamic and static arguments
+        dynamic_args = {k: v for k, v in arguments.items() if k not in static_argnames}
+        static_args = {k: arguments[k] for k in static_argnames if k in arguments}
+
+        # Check that we have dynamic arguments
+        if not dynamic_args:
+            raise ValueError("No dynamic arguments found. All arguments are static.")
+
+        # Determine the number of samples from any dynamic argument
+        n_samples = len(next(iter(dynamic_args.values())))
+
+        # Create lookup for sample indices by group
+        sample_groups = {}  # Maps sample index to group index
+        group_indices = {}  # Maps group index to list of sample indices
+        group_static = {}  # Maps group index to static args for that group
+        next_group = 0
+
+        for i in range(n_samples):
+            # Extract the "static" slice for this sample
+            sample_static = {}
+            for k, v in static_args.items():
+                sample_static[k] = v[i].item()
+
+            print(sample_static)
+
+            # Check if this combination already exists in a group
+            found_group = False
+            for group_idx, existing_static in group_static.items():
+                # Compare each static argument value
+                if all(
+                    (
+                        np.array_equal(sample_static[k], existing_static[k])
+                        if isinstance(sample_static[k], np.ndarray)
+                        else sample_static[k] == existing_static[k]
+                    )
+                    for k in sample_static
+                ):
+                    sample_groups[i] = group_idx
+                    group_indices[group_idx].append(i)
+                    found_group = True
+                    break
+
+            # If no matching group, create a new group
+            if not found_group:
+                group_idx = next_group
+                next_group += 1
+                sample_groups[i] = group_idx
+                group_indices[group_idx] = [i]
+                group_static[group_idx] = sample_static
+
+        # Process each group
+        all_results = []
+        res_tree = None
+
+        # print(static_args)
+        # print(group_indices)
+        for group_idx, indices in tqdm(group_indices.items()):
+            # Extract static args for this group
+            static_vals = group_static[group_idx]
+            # Extract dynamic args for these samples
+            group_dynamic = {k: v[indices] for k, v in dynamic_args.items()}
+
+            # Define function with static args baked in
+            @jax.jit
+            def run_with_static(dyn_args):
+                return func({**dyn_args, **static_vals})
+
+            # Create vmapped function
+            vfunc = vmap(run_with_static, in_axes=in_axes)
+
+            # Process in batches
+            group_batch_results = []
+            for i in trange(0, len(indices), batch_size):
+                if clear_buffer:  # ? Why??
+                    vfunc = vmap(run_with_static, in_axes=in_axes)
+
+                # Slice the batch
+                batch_args = {
+                    k: v[i : i + batch_size] for k, v in group_dynamic.items()
+                }
+
+                # Process batch
+                batch_result = vfunc(batch_args)
+
+                # Extract structure for the first batch
+                if res_tree is None:
+                    batch_values, batch_tree = jax.tree.flatten(
+                        batch_result, is_leaf=lambda a: isinstance(a, bm.Array)
+                    )
+                    res_tree = batch_tree
+                else:
+                    batch_values, _ = jax.tree.flatten(
+                        batch_result, is_leaf=lambda a: isinstance(a, bm.Array)
+                    )
+
+                group_batch_results.append(batch_values)
+
+            # Skip empty groups
+            if not group_batch_results:
+                continue
+
+            # Transpose to group by value index instead of by batch
+            n_values = len(group_batch_results[0])
+            value_batches = [[] for _ in range(n_values)]
+            for batch_values in group_batch_results:
+                for i, val in enumerate(batch_values):
+                    value_batches[i].append(np.asarray(val) if clear_buffer else val)
+
+            # Concatenate each value across its batches
+            concat_func = np.concatenate if clear_buffer else jnp.concatenate
+            group_values = [concat_func(batches, axis=0) for batches in value_batches]
+
+            # Store results along with the sample indices that produced them
+            all_results.append((indices, group_values))
+
+        # If everything is empty, return None
+        if not all_results:
+            return None
+
+        # Allocate final arrays and fill
+        n_values = len(all_results[0][1])
+        final_values = []
+        for i in range(n_values):
+            shape = all_results[0][1][i].shape[1:]  # remove batch dimension
+            dtype = all_results[0][1][i].dtype
+            final_values.append(np.zeros((n_samples,) + shape, dtype=dtype))
+
+        # Place group results in the correct location of final arrays
+        for indices, values in all_results:
+            for i, idx in enumerate(indices):
+                for v_idx, val in enumerate(values):
+                    final_values[v_idx][idx] = val[i]
+
+        # Clear memory if requested
+        if clear_buffer:
+            bm.clear_buffer_memory()
+
+        # Reconstruct the output from flattened form
         return jax.tree.unflatten(res_tree, final_values), arguments
 
     return _vmap
@@ -277,7 +437,7 @@ def temporal_average(V):
     return mean_V
 
 
-def grand_distribution(nbins):
+def grand_distribution(n_bins):
     @jax.jit
     def _grand_distribution(X):
         """
@@ -285,12 +445,12 @@ def grand_distribution(nbins):
         """
         lower = jnp.float32(jnp.min(X))
         upper = jnp.float32(jnp.max(X))
-        bin_size = (upper - lower) / nbins
-        bin_edges = jnp.linspace(lower, upper, nbins + 1)
+        bin_size = (upper - lower) / n_bins
+        bin_edges = jnp.linspace(lower, upper, n_bins + 1)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
         indices = jnp.floor((X - lower) / bin_size).astype(int)
-        indices = jnp.clip(indices, 0, nbins - 1)
-        hist = jnp.bincount(indices.flatten(), length=nbins)
+        indices = jnp.clip(indices, 0, n_bins - 1)
+        hist = jnp.bincount(indices.flatten(), length=n_bins)
         return hist, bin_centers
 
     return _grand_distribution

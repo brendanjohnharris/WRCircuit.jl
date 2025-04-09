@@ -15,7 +15,7 @@ begin
     begin # FNS parameters
         N_e = 4000
         J_e = 0.0008 # Microsiemens
-        nu = 6
+        nu = 8
         n_ext = 100
         K_ee = 72
         K_ei = 88
@@ -26,28 +26,28 @@ end
 begin
     tmax = 10u"s"
     tmin = 1u"s" # The transient. Simulations always begin at 0
-    fixed_params = (; N_e, J_e, nu, n_ext, K_ee, K_ie, K_ei, K_ii)
+    fixed_params = (; N_e, J_e, n_ext, K_ee, K_ie, K_ei, K_ii)
 
-    mua_dt = 10u"ms"
+    mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
 
     monitors = ("E.spike", "E.V", "E.input")
     stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-                      "susceptibility" => Dewdrop.stats.susceptibility(10),
-                      "spike_spectrum" => Dewdrop.stats.spike_spectrum(10),
+                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
+                      "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
                       "temporal_average" => Dewdrop.stats.temporal_average,
-                      "grand_distribution" => Dewdrop.stats.grand_distribution(1000),
-                      "mua" => Dewdrop.stats.mua(ustrip(to_ms(mua_dt))))
+                      "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
+                      "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))))
 end
 begin# * Generate dict of parameter vectors
     sweep = (;
-             delta = range(1.0, 7.0, length = 60))#,
-    #N_e = range(1000, 10000, length = 5))
+             delta = range(1.0, 7.0, length = 60),
+             nu = range(5.0, 10.0, length = 5))
     pnames = map(string, keys(sweep))
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
-    sweep_params = Dict(zip(pnames, eachcol(pvals))) # Now a good shape for jax
+    sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
     n_iters = length(first(values(sweep_params)))
-    keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42), n_iters)
-    sweep_params["key"] = Dewdrop.np.array(keys) # * So that each run is independent
+    jax_keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42), n_iters)
+    sweep_params["key"] = Dewdrop.numpy.array.(jax_keys) # * So that each run is independent
 end
 begin # * Create sweep function
     run = Dewdrop.stats.create_run(model, pydict(fixed_params), monitors,
@@ -89,7 +89,7 @@ if false
     end
 
     begin # * Load mua
-        _mua = load_stats["mua"]["E.spike"] |> convert2(Array)
+        _mua = stats["mua"]["E.spike"] |> convert2(Array)
         ts = range(tmin, stop = tmax, step = uconvert(u"s", mua_dt))[2:end] |> ustripall
         deltas = sweep_parameters["delta"] |> convert2(Array)
     end
