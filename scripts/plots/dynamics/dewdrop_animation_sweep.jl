@@ -1,0 +1,155 @@
+#! /bin/bash
+# -*- mode: julia -*-
+#=
+exec $HOME/build/julia-1.11.2/bin/julia -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
+=#
+using DrWatson
+DrWatson.@quickactivate
+using Dewdrop
+using JLD2
+Dewdrop.@preamble
+set_theme!(foresight(:physics))
+
+begin # * Model parameters
+    model = Dewdrop.models.Dewdrop
+    fixed_params = (; # Dewdrop parameters
+                    dx = 1.0,
+                    rho = 20000.0,
+                    kernel = Dewdrop.distances.ExponentialKernel,
+                    J_e = 0.0008,
+                    # delta = 3.0,
+                    nu = 7.0,
+                    n_ext = 100, sigma_ee = 0.0875,
+                    sigma_ei = 0.1,
+                    sigma_ie = 0.1875,
+                    sigma_ii = 0.1875,
+                    K_ee = 160,
+                    K_ie = 180,
+                    K_ei = 250,
+                    K_ii = 280)
+end
+begin
+    tmax = 5u"s"
+    tmin = 0u"s" # The transient. Simulations always begin at 0
+
+    mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
+
+    monitors = ("E.spike",)
+    stat_funcs = Dict(#"rate" => Dewdrop.stats.firing_rate,
+                      #   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
+                      #   "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => Dewdrop.stats.temporal_average,
+                      #   "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))),
+                      "monitor" => Dewdrop.stats.monitor)
+end
+begin# * Generate dict of parameter vectors
+    sweep = (; delta = range(2.0, 6.0, length = 9))
+    pnames = map(string, keys(sweep))
+    pvals = stack(Iterators.product(values(sweep)...), dims = 1)
+    sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
+    n_iters = length(first(values(sweep_params)))
+    jax_keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42), n_iters)
+    sweep_params["key"] = Dewdrop.numpy.array.(jax_keys) # * So that each run is independent
+end
+begin # * Create sweep function
+    run = Dewdrop.stats.create_run(model, pydict(fixed_params), monitors,
+                                   ustrip(to_ms(tmax)),
+                                   ustrip(to_ms(tmin)))
+    stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
+end
+begin # * Run simulation
+    stats, sweep_parameters = Dewdrop.stats.partial_vmap(stats_run, batch_size = 4)(pydict(sweep_params))
+end
+begin # * Loop over stats and construct spike trains
+    ts = range(0u"s", tmax, step = convert2(Float64)(Dewdrop.brainpy.share["dt"]) * u"ms")[2:end]
+    deltas = sweep_parameters["delta"] |> convert2(Vector) |> Dim{:delta}
+    spikes = stats["monitor"]["E.spike"] |> PyArray
+    # spikes = permutedims(spikes, (2, 1, 3)) # * Shape is now (t, delta, n)
+end
+begin # * Infer spatial grid
+    dx = fixed_params[:dx]
+    n = sqrt(size(spikes, 3)) |> Int
+    δx = dx / n
+    x = range(δx / 2, dx, step = δx)
+    grid = Iterators.product(x, x) |> collect
+end
+begin # * Reshape spike trains
+    spikes = reshape(spikes, (size(spikes, 1), size(spikes, 2), n, n))
+    spikes = ToolsArray(spikes, (deltas, 𝑡(ts), DimensionalData.X(x), DimensionalData.Y(x)))
+    spikes = rectify(spikes, dims = :delta; tol = 10)
+    spikes = permutedims(spikes, (2, 3, 4, 1)) # * Shape is now (t, delta, x, y)
+end
+begin # * Convert to a list of (x, y) points for each time t
+    tbin = 5u"ms"
+    tbins = range(first(times(spikes)), last(times(spikes)), step = tbin) |> intervals
+    spiketimes = groupby(spikes, 𝑡 => Bins(tbins))
+    spiketimes = progressmap(spiketimes) do x
+        dropdims(any(x, dims = 𝑡), dims = 𝑡)
+    end
+    spiketimes = permutedims(stack(spiketimes), (4, 1, 2, 3))
+    spiketimes = set(spiketimes, 𝑡 => mean.(times(spiketimes)))
+    spikeidxs = map(eachslice(spiketimes, dims = (𝑡, :delta))) do x
+        is = findall(x)
+        isempty(is) ? [Point2f([NaN, NaN])] : Point2f.(grid[is])
+    end
+end
+# begin # * Set up plot
+#     d = 6
+#     delta = lookup(spikeidxs, :delta)[d]
+
+#     f = Figure(size = (800, 600))
+#     Idxs = spikeidxs[delta = Near(delta)]
+#     idxs = Observable(first(Idxs))
+#     ax = Axis(f[1, 1], title = "δ = $delta", limits = ((0, dx), (0, dx)))
+#     scatter!(ax, idxs, markersize = 5)
+#     f
+# end
+# begin # * Animation loop
+#     record(f, "dewdrop_sweep.mp4", eachindex(Idxs), framerate = 48) do i
+#         idxs[] = Idxs[i]
+#     end
+# end
+begin # * Animate all at once
+    nrows = 3
+    ncols = ceil(Int, length(deltas) ÷ nrows)
+    f = Figure(size = (ncols * 200, nrows * 200))
+    gs = subdivide(f, nrows, ncols)
+    idxs = map(eachslice(spikeidxs, dims = :delta)) do x
+        x = x[1] |> parent |> Observable
+    end
+    for (i, delta) in enumerate(deltas)
+        ax = Axis(gs[i], title = "δ = $delta", limits = ((0, dx), (0, dx)), aspect = 1)
+        hidedecorations!(ax)
+        scatter!(ax, idxs[i], markersize = 3)
+    end
+    f
+end
+begin # * Animate
+    using Term.Progress
+
+    ts = 1:size(spikeidxs, 1)
+    pbar = ProgressBar()
+    job = addjob!(pbar; N = length(ts))
+    with(pbar) do
+        record(f, "dewdrop_sweep_all.mp4", ts, framerate = 24) do t
+            for (i, delta) in enumerate(deltas)
+                idxs[i][] = spikeidxs[t, i]
+            end
+            update!(job)
+        end
+    end
+    f
+end
+# begin # * try a heatmap approach
+#     f = Figure(size = (800, 600))
+#     ax = Axis(f[1, 1], title = "δ = $delta", limits = ((0, dx), (0, dx)))
+#     XX = spiketimes[delta = Near(delta)]
+#     xx = XX[1, :, :] |> parent |> Observable
+#     heatmap!(ax, x, x, xx, colormap = seethrough(:turbo), colorrange = (0, 1))
+#     f
+# end
+# begin # * Animation loop
+#     record(f, "dewdrop_sweep_heatmap.mp4", axes(XX)[1], framerate = 48) do i
+#         xx[] = XX[i, :, :] |> parent
+#     end
+# end

@@ -161,7 +161,7 @@ ArrayType = Any  # For simplicity
 def partial_vmap(
     func: callable,
     batch_size: int,
-    static_argnames: List[str],
+    static_argnames: List[str] = [],
     in_axes=0,
     clear_buffer: bool = True,
 ):
@@ -242,7 +242,7 @@ def partial_vmap(
 
             # Process in batches
             group_batch_results = []
-            for i in trange(0, len(indices), batch_size):
+            for i in trange(0, len(indices), batch_size, leave=False):
                 # if clear_buffer:  # ? Why??
                 #     vfunc = vmap(run_with_static, in_axes=in_axes)
 
@@ -259,13 +259,19 @@ def partial_vmap(
                     batch_values, batch_tree = jax.tree.flatten(
                         batch_result, is_leaf=lambda a: isinstance(a, bm.Array)
                     )
+                    batch_values = [array_func(val) for val in batch_values]
                     res_tree = batch_tree
                 else:
                     batch_values, _ = jax.tree.flatten(
                         batch_result, is_leaf=lambda a: isinstance(a, bm.Array)
                     )
+                    batch_values = [array_func(val) for val in batch_values]
 
                 group_batch_results.append(batch_values)
+
+                # Clear memory if requested
+                if clear_buffer:
+                    bm.clear_buffer_memory()
 
             # Skip empty groups
             if not group_batch_results:
@@ -302,10 +308,6 @@ def partial_vmap(
             for i, idx in enumerate(indices):
                 for v_idx, val in enumerate(values):
                     final_values[v_idx][idx] = val[i]
-
-        # Clear memory if requested
-        if clear_buffer:
-            bm.clear_buffer_memory()
 
         # Reconstruct the output from flattened form
         return jax.tree.unflatten(res_tree, final_values), arguments
@@ -472,3 +474,7 @@ def mua(bin, dt=bp.share["dt"]):
         return mua
 
     return _mua
+
+
+def monitor(mon):
+    return mon

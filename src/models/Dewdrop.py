@@ -189,7 +189,7 @@ class Dewdrop(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ei = DistanceDependent(
-                num_connections=self.K_ei * ne,
+                num_connections=self.K_ei * ni,
                 kernel=kernel(sigma=self.sigma_ei, p_max=self.p_ei),
                 domain=self.E.embedding.domain,
                 positions_pre=self.E.positions,
@@ -198,7 +198,7 @@ class Dewdrop(bp.Network):
             )
             self.key, subkey = jax.random.split(self.key)
             conn_ie = DistanceDependent(
-                num_connections=self.K_ie * ni,
+                num_connections=self.K_ie * ne,
                 kernel=kernel(sigma=self.sigma_ie, p_max=self.p_ie),
                 domain=self.I.embedding.domain,
                 positions_pre=self.I.positions,
@@ -434,15 +434,15 @@ class Dewdrop(bp.Network):
             sigma = self.sigma_ii
 
         if approx:
-            result = 2 * np.pi * sigma**2 * p_max
+            result = self.kernel.pmax2mass(p_max, sigma)  # 2 * np.pi * sigma**2 * p_max
         else:
 
-            def integrand(y, x, dx, sigma, p_max):
+            def integrand(y, x, dx, kernel_func, p_max):
                 # y is integrated first, x second (dblquad's calling convention).
                 rx = min(x, dx - x)
                 ry = min(y, dx - y)
-                r2 = rx * rx + ry * ry
-                return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
+                r = np.sqrt(rx * rx + ry * ry)
+                return p_max * self.kernel(r)
 
             result, error_est = dblquad(
                 integrand,
