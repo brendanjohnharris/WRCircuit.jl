@@ -30,14 +30,14 @@ def create_run(
     transient=0.0,
     concrete_out=False,
 ):
-
+    monitor_names = [m if isinstance(m, str) else m[0] for m in monitors]
     transient_idx = int(transient / bp.share["dt"])
 
     def run(swept_params):
         m = model(**fixed_params, **swept_params)
         runner = bp.DSRunner(m, monitors=monitors, numpy_mon_after_run=concrete_out)
         runner.run(duration=duration)
-        return {m: runner.mon[m][transient_idx:, :] for m in monitors}
+        return {m: runner.mon[m][transient_idx:, :] for m in monitor_names}
 
     return run
 
@@ -291,6 +291,9 @@ def partial_vmap(
             # Store results along with the sample indices that produced them
             all_results.append((indices, group_values))
 
+            if clear_buffer:
+                bm.clear_buffer_memory()
+
         # If everything is empty, return None
         if not all_results:
             return None
@@ -474,6 +477,14 @@ def mua(bin, dt=bp.share["dt"]):
         return mua
 
     return _mua
+
+
+def select(func, idxs):
+
+    def _select(spikes):
+        return func(spikes[:, idxs])
+
+    return _select
 
 
 def monitor(mon):

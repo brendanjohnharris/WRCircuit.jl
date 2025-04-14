@@ -4,7 +4,7 @@ using StatsBase
 using Random
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts, timebins, unitarylfp, to_ms, pytree2dict
+       structurefunction, histcounts, timebins, unitarylfp, to_ms, to_mm, pytree2dict
 
 function _preamble()
     quote
@@ -166,6 +166,8 @@ TimeseriesTools.coarsegrain(x::UnivariateRegular, τ::Number) = timebins(x, τ)
 
 to_ms(x::Real) = x * u"ms" # Assume ms already
 to_ms(x::Quantity) = uconvert(u"ms", x)
+to_mm(x::Real) = x * u"mm" # Assume mm already
+to_mm(x::Quantity) = uconvert(u"mm", x)
 
 function check_inputs(times, spikes, spike_type)
     if !(spike_type in [:E, :I])

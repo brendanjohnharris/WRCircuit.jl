@@ -350,10 +350,13 @@ class FNS(bp.Network):
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
+        e_delay = 1.5
+        i_delay = 2.0
+
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
-            delay=1.5,
+            delay=e_delay,
             conn=conn_ee,
             tau_d=tau_d_e,
             tau_r=tau_r_e,
@@ -365,7 +368,7 @@ class FNS(bp.Network):
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
-            delay=1.5,
+            delay=e_delay,
             conn=conn_ei,
             tau_d=tau_d_e,
             tau_r=tau_r_e,
@@ -376,7 +379,7 @@ class FNS(bp.Network):
         self.I2E = Synapse(
             pre=self.I,
             post=self.E,
-            delay=2.0,
+            delay=i_delay,
             conn=conn_ie,
             tau_d=tau_d_i,
             tau_r=tau_r_i,
@@ -387,7 +390,7 @@ class FNS(bp.Network):
         self.I2I = Synapse(
             pre=self.I,
             post=self.I,
-            delay=2.0,
+            delay=i_delay,
             conn=conn_ii,
             tau_d=tau_d_i,
             tau_r=tau_r_i,
@@ -411,7 +414,7 @@ class FNS(bp.Network):
             pre=self.ext,
             post=self.E,
             conn=conn_exte,
-            delay=1.5,
+            delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_e,
             tau_r=1.0,
@@ -421,7 +424,7 @@ class FNS(bp.Network):
             pre=self.ext,
             post=self.I,
             conn=conn_exti,
-            delay=1.5,
+            delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_e,
             tau_r=1.0,

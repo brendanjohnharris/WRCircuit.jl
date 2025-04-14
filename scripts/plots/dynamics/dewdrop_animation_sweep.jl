@@ -17,19 +17,20 @@ begin # * Model parameters
                     rho = 20000.0,
                     kernel = Dewdrop.distances.ExponentialKernel,
                     J_e = 0.0008,
-                    # delta = 3.0,
+                    # delta = 4.0,
                     nu = 7.0,
-                    n_ext = 100, sigma_ee = 0.0875,
-                    sigma_ei = 0.1,
-                    sigma_ie = 0.1875,
-                    sigma_ii = 0.1875,
-                    K_ee = 160,
-                    K_ie = 180,
-                    K_ei = 250,
-                    K_ii = 280)
+                    n_ext = 100,
+                    sigma_ee = 0.070,
+                    sigma_ei = 0.080,
+                    sigma_ie = 0.15,
+                    sigma_ii = 0.15,
+                    K_ee = 136,
+                    K_ie = 144,
+                    K_ei = 200,
+                    K_ii = 224)
 end
 begin
-    tmax = 5u"s"
+    tmax = 10u"s"
     tmin = 0u"s" # The transient. Simulations always begin at 0
 
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
@@ -80,7 +81,7 @@ begin # * Reshape spike trains
     spikes = permutedims(spikes, (2, 3, 4, 1)) # * Shape is now (t, delta, x, y)
 end
 begin # * Convert to a list of (x, y) points for each time t
-    tbin = 5u"ms"
+    tbin = 1u"ms"
     tbins = range(first(times(spikes)), last(times(spikes)), step = tbin) |> intervals
     spiketimes = groupby(spikes, 𝑡 => Bins(tbins))
     spiketimes = progressmap(spiketimes) do x
@@ -127,7 +128,7 @@ end
 begin # * Animate
     using Term.Progress
 
-    ts = 1:size(spikeidxs, 1)
+    ts = 1:5:size(spikeidxs, 1)
     pbar = ProgressBar()
     job = addjob!(pbar; N = length(ts))
     with(pbar) do
