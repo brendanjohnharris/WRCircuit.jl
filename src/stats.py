@@ -487,5 +487,37 @@ def select(func, idxs):
     return _select
 
 
+def efficiency(bin_indices, tau):
+
+    def _efficiency(spikes):
+        nbins_x = bin_indices.shape[0]
+        nbins_y = bin_indices.shape[1]
+        # * Sum the spike counts for each neuron over the time interval
+        tbinned = coarsegrain(spikes, int(tau / bp.share["dt"]))
+
+        # * group the spike counts from each bin for each time bin
+        xbinned = np.empty((nbins_x, nbins_y, tbinned.shape[0]), dtype=int)
+        for i in range(nbins_x):
+            for j in range(nbins_y):
+                xbinned[i, j] = tbinned[:, bin_indices[i, j]].sum(axis=1)
+
+        xprob = xbinned / np.sum(xbinned, axis=0, keepdims=True)
+        # * Now calcualte the entropy for each time bin
+        H = np.zeros(xprob.shape[-1])
+        for i in range(xprob.shape[-1]):
+            H[i] = -np.sum(xprob[:, :, i] * np.log(xprob[:, :, i] + 1e-10))  # ok??
+        H
+
+        # * Calculate a energy cost equal to the number of spikes emitted at each time step
+        C = np.sum(tbinned, axis=1)  # Sum over neurons
+
+        # efficiency is the ratio of the two
+        n = spikes.shape[1]
+        eta = n * H / C
+        return eta
+
+    return _efficiency
+
+
 def monitor(mon):
     return mon

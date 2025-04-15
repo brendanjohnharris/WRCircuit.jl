@@ -43,7 +43,7 @@ begin
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
     mua_func = Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt)))
 
-    dn = floor(Int, sqrt(rho / dx^2))
+    dn = round(Int, sqrt(rho * dx^2))
     positions = Dewdrop.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
     positions = map(positions) do pos
         map(pos) do p
@@ -71,7 +71,7 @@ begin
 end
 begin# * Generate dict of parameter vectors
     sweep = (;
-             delta = range(2.0, 8.0, length = 20),
+             delta = range(2.0, 8.0, length = 12),
              nu = range(6.5, 6.5, length = 1))
     pnames = map(string, keys(sweep))
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
@@ -87,7 +87,7 @@ begin # * Create sweep function
     stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 2)(pydict(sweep_params))
+    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 3)(pydict(sweep_params))
 end
 begin
     Dewdrop.stats.save("dewdrop_better_bifurcation.pickle",

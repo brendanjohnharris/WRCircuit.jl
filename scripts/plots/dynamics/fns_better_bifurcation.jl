@@ -99,26 +99,3 @@ if false
         spectra = spectrum(mua)
     end
 end
-# begin
-#     f = Figure(size = (800, 600))
-#     colorrange = extrema(lookup(stats, :omicron)) .+ [0, 0.001]
-#     map(enumerate(eachslice(ustripall(stats), dims = :statistic))) do (i, stat)
-#         statname = refdims(stat) |> only |> only
-#         ax = Axis(f[i, 1]; ylabel = "$statname")
-#         map(eachslice(stat, dims = :omicron)) do stat
-#             omicron = refdims(stat)
-#             omicron = omicron[dimname.(omicron) .== ["omicron"]] |> only |> only
-#             stat = upsample(stat, 10; dims = 1)
-#             lines!(ax, stat; color = omicron, colorrange, label = "o = $omicron")
-#         end
-#         axislegend(ax)
-#     end
-#     map(contents(f.layout)[1:(end - 1)]) do ax
-#         hidexdecorations!(ax)
-#         ax.xgridvisible = true
-#         ax.xticksvisible = true
-#     end
-#     last(contents(f.layout)).xlabel = "δ"
-#     save("fns_bifurcation.pdf", f)
-#     f
-# end

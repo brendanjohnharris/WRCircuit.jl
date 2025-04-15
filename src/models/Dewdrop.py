@@ -37,7 +37,7 @@ from ..positions import *
 from ..synapses import *
 
 
-class Dewdrop(bp.Network):
+class Spatial(bp.Network):
     """
     A spatially embedded network of FNS neurons.
     network

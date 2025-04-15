@@ -10,13 +10,13 @@ using JLD2
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
-# * Check this with fns_better_bifurcation.jl
-tmax = 10u"s"
-tmin = 1u"s" # The transient. Simulations always begin at 0
-mua_dt = 2u"ms"
-
 begin # * Load stats
-    load_stats, sweep_parameters, fixed_parameters = Dewdrop.stats.load("fns_better_bifurcation.pickle")
+    load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("dewdrop_better_bifurcation.pickle")
+
+    tmax = metadata[:tmax].val |> convert2(Float32)
+    tmin = metadata[:tmin].val |> convert2(Float32)
+    mua_dt = metadata[:mua_dt].val |> convert2(Float32)
+    mua_dt = mua_dt / 1000
 end
 begin
     begin # * Extract a ToolsArray of one statistic
@@ -35,17 +35,18 @@ begin
         # heatmap!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colorrange,
         #  colormap = :viridis)
 
-        traces!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colormap = :viridis)
+        # traces!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colormap = :viridis)
+        # Colorbar(f[1, 2]; colormap = :viridis, colorrange,
+        #          label = "background rate (Hz)")
 
-        Colorbar(f[1, 2]; colormap = :viridis, colorrange,
-                 label = "background rate (Hz)")
+        lines!(ax, sort(unique(deltas)), meanrate[:]; alpha = 0.5)
         f
     end
 end
 
 begin # * Load mua
     _mua = load_stats["mua"]["E.spike"] |> convert2(Array)
-    ts = range(tmin, stop = tmax, step = uconvert(u"s", mua_dt))[2:end] |> ustripall
+    ts = range(tmin, stop = tmax, step = mua_dt)[2:end] |> ustripall
 
     delta = sort(unique(deltas))
     nu = sort(unique(nus))
@@ -58,13 +59,13 @@ begin
     mumua = mua .- mean(mua, dims = 𝑡)
     spectra = map(x -> spectrum(x, 0.8, padding = 500), eachslice(mumua, dims = (2, 3))) |>
               stack
-    plot(spectra[delta = Near(4), nu = Near(7)])
+    plot(spectra[delta = Near(4.0), nu = Near(7)])
 end
 begin
     # * plot a heatmap for a given nu
     f = Figure()
     ax = Axis(f[1, 1]; xlabel = "frequency (Hz)", ylabel = "δ")
-    x = spectra[delta = Near(3.5)]
+    x = spectra[nu = Near(6.5)]
     # x = x[nu = 1.0 .. 5.0]
     x = x[𝑓 = IntervalSets.OpenInterval(0, 200)]
     x = log10.(x)
@@ -92,20 +93,41 @@ begin # * Load distribution of synaptic weights
     bins = ToolsArray(bins, (Dim{:delta}(delta), Dim{:nu}(nu), Dim{:bin}(1:size(bins, 3))))
     bins = permutedims(bins, (3, 1, 2))
 end
-begin
-    # * plot a heatmap for a given nu
+begin # * Plot input distributions
     f = Figure()
     ax = Axis(f[1, 1]; xlabel = "Input during timestep", ylabel = "Frequency",
-              yscale = log10,
-              limits = (nothing, (1, 50000000)))
+              #   yscale = log10,
+              limits = ((-0.25, 1), (1, 4500000)))
     x = input_distribution[nu = Near(6)]
     b = bins[nu = Near(6)]
 
-    dd = 5
+    dd = 2
     map(delta[1:dd:end], eachslice(x, dims = :delta)[1:dd:end],
         eachslice(b, dims = :delta)[1:dd:end]) do _delta, _x, _b
         lines!(ax, collect(_b), (collect(_x)); color = _delta, alpha = 0.7,
                colormap = :turbo, colorrange = extrema(delta))
+    end
+    Colorbar(f[1, 2]; colormap = :turbo, colorrange = extrema(delta),
+             label = "δ")
+    f
+end
+begin # * Plot the suceptibility
+    delta = sort(unique(deltas))
+    nu = sort(unique(nus))
+    susceptibility = load_stats["susceptibility"]["E.spike"] |> convert2(Array)
+    susceptibility = reshape(susceptibility, length(delta), length(nu))
+    susceptibility = ToolsArray(susceptibility, (Dim{:delta}(delta), Dim{:nu}(nu)))
+
+    f = Figure()
+    ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "Susceptibility")
+    x = susceptibility[nu = Near(6)]
+
+    dd = 2
+    map(delta[1:dd:end], eachslice(x, dims = :delta)[1:dd:end]) do _delta, _x
+        lines!(ax, decompose(_x)...; color = _delta,
+               alpha = 0.7,
+               colormap = :turbo,
+               colorrange = extrema(delta))
     end
     Colorbar(f[1, 2]; colormap = :turbo, colorrange = extrema(delta),
              label = "δ")
