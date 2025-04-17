@@ -11,23 +11,30 @@ Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Model parameters
-    model = Dewdrop.models.Dewdrop
-    fixed_params = (; # Dewdrop parameters
-                    dx = 1.0,
-                    rho = 20000.0,
-                    kernel = Dewdrop.distances.ExponentialKernel,
-                    J_e = 0.0008,
-                    # delta = 4.0,
-                    nu = 7.0,
-                    n_ext = 100,
-                    sigma_ee = 0.070,
-                    sigma_ei = 0.080,
-                    sigma_ie = 0.15,
-                    sigma_ii = 0.15,
-                    K_ee = 136,
-                    K_ie = 144,
-                    K_ei = 200,
-                    K_ii = 224)
+    model = Dewdrop.models.Spatial
+
+    dx = 0.5
+    rho = 20000.0
+    kernel = Dewdrop.distances.GaussianKernel
+    J_e = 0.0008
+    # delta = 3.5
+    nu = 7.0
+    n_ext = 100
+
+    sigma_ee = 0.04
+    sigma_ei = 0.05
+    sigma_ie = 0.12
+    sigma_ii = 0.12
+
+    k = 0.9
+    K_ee = round(Int, 130 * k)
+    K_ie = round(Int, 180 * k)
+    K_ei = round(Int, 200 * k)
+    K_ii = round(Int, 250 * k)
+
+    fixed_params = (; dx, rho, kernel, J_e, nu, n_ext,
+                    sigma_ee, sigma_ei, sigma_ie, sigma_ii,
+                    K_ee, K_ie, K_ei, K_ii)
 end
 begin
     tmax = 10u"s"
@@ -59,7 +66,7 @@ begin # * Create sweep function
     stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.partial_vmap(stats_run, batch_size = 4)(pydict(sweep_params))
+    stats, sweep_parameters = Dewdrop.stats.partial_vmap(stats_run, batch_size = 5)(pydict(sweep_params))
 end
 begin # * Loop over stats and construct spike trains
     ts = range(0u"s", tmax, step = convert2(Float64)(Dewdrop.brainpy.share["dt"]) * u"ms")[2:end]

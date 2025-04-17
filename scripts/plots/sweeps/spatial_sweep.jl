@@ -16,21 +16,22 @@ begin
     begin # FNS parameters
         dx = 0.5
         rho = 20000.0
-        kernel = Dewdrop.distances.ExponentialKernel
+        kernel = src.distances.GaussianKernel
         J_e = 0.0008
-        # delta = 4.0
-        # nu = 7.0
+        delta = 3.5
+        nu = 7.0
         n_ext = 100
 
-        sigma_ee = 0.070
-        sigma_ei = 0.080
-        sigma_ie = 0.15
-        sigma_ii = 0.15
+        sigma_ee = 0.04
+        sigma_ei = 0.05
+        sigma_ie = 0.12
+        sigma_ii = 0.12
 
-        K_ee = 136
-        K_ie = 144
-        K_ei = 200
-        K_ii = 224
+        k = 0.9
+        K_ee = int(130 * k)
+        K_ie = int(180 * k)
+        K_ei = int(200 * k)
+        K_ii = int(250 * k)
     end
 end
 begin
