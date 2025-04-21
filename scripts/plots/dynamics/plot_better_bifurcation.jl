@@ -11,7 +11,7 @@ Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Load stats
-    load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("dewdrop_better_bifurcation.pickle")
+    load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("nonspatial_better_bifurcation.pickle")
 
     tmax = metadata[:tmax].val |> convert2(Float32)
     tmin = metadata[:tmin].val |> convert2(Float32)

@@ -19,7 +19,7 @@ from sbijax import NLE
 from sbijax.nn import make_maf
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.models.FNS import FNS
+from src.models.Nonspatial import FNS
 
 # ------------------------------------------------------------------------------
 # GLOBALS

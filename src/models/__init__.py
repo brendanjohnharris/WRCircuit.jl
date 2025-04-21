@@ -1,5 +1,5 @@
 from .balanced import *
 from .heterogeneous import *
-from .FNS import *
-from .Dewdrop import *
+from .Nonspatial import *
+from .Spatial import *
 from .adaptiveheterogeneous import *

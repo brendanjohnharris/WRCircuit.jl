@@ -138,3 +138,77 @@ class CSRConn(TwoEndConnector):
         #         f"the maximum id ({self.max_post}) of self.post_ids."
         #     )
         return self.indices, self.inptr
+
+
+@jax.jit
+def sorted_block_assignment(
+    weights: jnp.ndarray,
+    degrees: jnp.ndarray,
+) -> jnp.ndarray:
+    """
+    Assign unsorted synaptic weights to neurons so that each neuron's total
+    weight is proportional to 1/sqrt(degree), using the sorted-block method.
+
+    Args:
+        weights: 1D array of shape (S,) containing unsorted weight samples,
+                 where S = sum(degrees).
+        degrees: 1D int array of shape (N,) of in-degrees per neuron.
+
+    Returns:
+        out: 1D array of shape (S,), with weights permuted into contiguous blocks
+             for each neuron in original neuron order.
+    """
+    # Number of neurons and total synapses
+    N = degrees.shape[0]
+    S = weights.shape[0]
+
+    # Sort weights ascending
+    ws = jnp.sort(weights)
+
+    # Compute per-neuron target totals ∝ 1/√k
+    target = 1.0 / jnp.sqrt(degrees)
+
+    # Determine sort order: smallest target (largest k) first
+    order = jnp.argsort(target)
+
+    # Sorted degrees and their cumulative boundaries
+    deg_sorted = degrees[order]
+    boundaries_sorted = jnp.concatenate(
+        [jnp.zeros(1, dtype=jnp.int32), jnp.cumsum(deg_sorted, dtype=jnp.int32)], axis=0
+    )  # shape (N+1,)
+
+    # Synapse indices 0..S-1
+    syn_idx = jnp.arange(S, dtype=jnp.int32)
+
+    # For each synapse, find which sorted-neuron block it belongs to
+    # searchsorted returns i such that boundaries_sorted[i-1] <= idx < boundaries_sorted[i]
+    sorted_neu_idx = jnp.searchsorted(boundaries_sorted, syn_idx, side="right") - 1
+
+    # Offset within each neuron's block
+    offsets = syn_idx - boundaries_sorted[sorted_neu_idx]
+
+    # Map sorted-neuron indices back to original neuron indices
+    syn2neu = order[sorted_neu_idx]
+
+    # Compute original boundaries in the natural neuron order
+    boundaries_orig = jnp.concatenate(
+        [jnp.zeros(1, dtype=jnp.int32), jnp.cumsum(degrees, dtype=jnp.int32)], axis=0
+    )  # shape (N+1,)
+
+    # Final positions for each sorted weight in the output array
+    positions = boundaries_orig[syn2neu] + offsets
+
+    # Scatter sorted weights into output
+    out = jnp.zeros_like(ws)
+    out = out.at[positions].set(ws)
+    return out
+
+
+def draw_lognormal(mu, sigma, size):
+    """
+    Draw a sample from a log-normal distribution with given parameters. mu and sigma are the
+    mean and std of the full lognormal distribution
+    """
+    _mu = jnp.log(mu**2 / jnp.sqrt(mu**2 + sigma**2))
+    _sigma = jnp.sqrt(jnp.log(1 + (sigma**2 / mu**2)))
+    return bp.math.random.lognormal(_mu, _sigma, size)

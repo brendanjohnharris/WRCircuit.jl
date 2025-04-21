@@ -221,7 +221,7 @@ class DisconnectedFNS(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
 
-class FNS(bp.Network):
+class Nonspatial(bp.Network):
     """
     A spatially independent network of FNS neurons.
     """
@@ -235,9 +235,13 @@ class FNS(bp.Network):
         K_ii=39,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
-        nu=1,  # External population firing rate
-        n_ext=10,  # Number of external synapses per Exc. neuron
+        nu=7.0,  # External population firing rate
+        n_ext=100,  # Number of external synapses per Exc. neuron
         J_e=0.0008,  # ! Has same units as g_L: uS
+        tau_r_e=1.0,
+        tau_r_i=1.0,
+        tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
+        tau_d_i=4.5,  # 3.0 for yifan, # 4.5 for shencong
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
         copy_conn=False,  # Whether to copy connectivity from the provided network
@@ -263,6 +267,13 @@ class FNS(bp.Network):
         self.omega_ie = self.required_omega("ie")
         self.omega_ei = self.required_omega("ei")
         self.omega_ii = self.required_omega("ii")
+
+        self.tau_r_e = tau_r_e
+        self.tau_r_i = tau_r_i
+        self.tau_d_e = (
+            tau_d_e  # * Excitatory synapse decays more slowly than inhibitory
+        )
+        self.tau_d_i = tau_d_i  # 3.0 for yifan, # 4.5 for shencong
 
         self.key, subkey = jax.random.split(self.key)
         exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
@@ -343,10 +354,6 @@ class FNS(bp.Network):
             conn_exti = FixedProb(prob=p_ext, seed=subkeys[5])
 
         # Synapses
-        tau_r_e = 1.0
-        tau_r_i = 1.0
-        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
@@ -441,29 +448,58 @@ class FNS(bp.Network):
         self.reinit_weights(self.delta, self.J_e)
 
     def _reinit_weights(self, delta, J_e):
+        # self.J_i = self.J_e * self.delta
+        # self.key, *subkeys = jax.random.split(self.key, 7)
+        # self.E2E.proj.comm.weight = correlate_weights(
+        #     self.E2E.proj,
+        #     self.J_e,
+        #     self.N_e,
+        #     subkeys[0],  # ? Need to pass N_ee to keep this function jittable.
+        # )
+        # self.E2I.proj.comm.weight = correlate_weights(
+        #     self.E2I.proj, self.J_e, self.N_i, subkeys[1]
+        # )
+        # self.I2E.proj.comm.weight = correlate_weights(
+        #     self.I2E.proj, self.J_i, self.N_e, subkeys[2]
+        # )
+        # self.I2I.proj.comm.weight = correlate_weights(
+        #     self.I2I.proj, self.J_i, self.N_i, subkeys[3]
+        # )
+        # self.ext2E.proj.comm.weight = correlate_weights(
+        #     self.ext2E.proj, self.J_e, self.N_e, subkeys[4]
+        # )
+        # self.ext2I.proj.comm.weight = correlate_weights(
+        #     self.ext2I.proj, self.J_e, self.N_i, subkeys[5]
+        # )
+
+        K_ee = indegrees_static(self.E2E.proj.comm.indices, self.N_e)
+        K_ei = indegrees_static(self.E2I.proj.comm.indices, self.N_i)
+        K_ie = indegrees_static(self.I2E.proj.comm.indices, self.N_e)
+        K_ii = indegrees_static(self.I2I.proj.comm.indices, self.N_i)
+        K_ext_e = indegrees_static(self.ext2E.proj.comm.indices, self.N_e)
+        K_ext_i = indegrees_static(self.ext2I.proj.comm.indices, self.N_i)
+
         self.J_i = self.J_e * self.delta
-        self.key, *subkeys = jax.random.split(self.key, 7)
-        self.E2E.proj.comm.weight = correlate_weights(
-            self.E2E.proj,
-            self.J_e,
-            self.N_e,
-            subkeys[0],  # ? Need to pass N_ee to keep this function jittable.
-        )
-        self.E2I.proj.comm.weight = correlate_weights(
-            self.E2I.proj, self.J_e, self.N_i, subkeys[1]
-        )
-        self.I2E.proj.comm.weight = correlate_weights(
-            self.I2E.proj, self.J_i, self.N_e, subkeys[2]
-        )
-        self.I2I.proj.comm.weight = correlate_weights(
-            self.I2I.proj, self.J_i, self.N_i, subkeys[3]
-        )
-        self.ext2E.proj.comm.weight = correlate_weights(
-            self.ext2E.proj, self.J_e, self.N_e, subkeys[4]
-        )
-        self.ext2I.proj.comm.weight = correlate_weights(
-            self.ext2I.proj, self.J_e, self.N_i, subkeys[5]
-        )
+        w_ee = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ee))
+        w_ei = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ei))
+        w_ie = draw_lognormal(self.J_i, self.J_i / 4, jnp.sum(K_ie))
+        w_ii = draw_lognormal(self.J_i, self.J_i / 4, jnp.sum(K_ii))
+        w_ext_e = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ext_e))
+        w_ext_i = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ext_i))
+
+        w_ee = sorted_block_assignment(w_ee, K_ee)
+        w_ei = sorted_block_assignment(w_ei, K_ei)
+        w_ie = sorted_block_assignment(w_ie, K_ie)
+        w_ii = sorted_block_assignment(w_ii, K_ii)
+        w_ext_e = sorted_block_assignment(w_ext_e, K_ee)
+        w_ext_i = sorted_block_assignment(w_ext_i, K_ei)
+
+        self.E2E.proj.comm.weight = w_ee
+        self.E2I.proj.comm.weight = w_ei
+        self.I2E.proj.comm.weight = w_ie
+        self.I2I.proj.comm.weight = w_ii
+        self.ext2E.proj.comm.weight = w_ext_e
+        self.ext2I.proj.comm.weight = w_ext_i
 
     def reinit_weights(self, delta=None, J_e=None):
         if delta is not None:

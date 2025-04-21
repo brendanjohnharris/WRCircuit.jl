@@ -22,3 +22,5 @@ lcov*.info
 __pycache__/
 *.json
 *.pickle
+.nfs*
+.CondaPkgOld/

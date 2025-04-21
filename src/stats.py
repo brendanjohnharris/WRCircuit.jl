@@ -17,7 +17,7 @@ import json
 import pickle
 
 from brainpy import share
-from typing import Union, Callable, Optional, Sequence, Any, Dict
+from typing import Union, Callable, Optional, Sequence, Any, Dict, Tuple, List
 from brainpy.types import ArrayType
 from functools import partial
 
@@ -517,6 +517,133 @@ def efficiency(bin_indices, tau):
         return eta
 
     return _efficiency
+
+
+def radial_autocorrelation(
+    positions: List[Tuple[float, float]],
+    dr: float = 0.05,
+) -> Callable[[jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
+    """
+    Build a callable that returns the radial (isotropic) autocorrelation
+    of binary activity on a rectangular lattice.
+
+    Parameters
+    ----------
+    positions : list of (x, y)
+        Flat list of X × Y coordinates for each site/neuron/pixel.
+    dr : float, optional
+        Shell width for the radial average (same units as `positions`).
+
+    Returns
+    -------
+    f(S) -> (g_r, r_bins)
+        S : array, shape (T, N=X*Y)
+            0/1 (or count) raster — one row per time frame.
+        g_r : array, shape (len(r_bins),)
+            Radially averaged autocorrelation; g_r[0] == 1.
+        r_bins : array
+            Left edges of the radial shells.
+    """
+
+    # ------------------------------------------------------------------ grid checks
+    xs = jnp.unique(jnp.array(sorted([x for x, _ in positions])))
+    ys = jnp.unique(jnp.array(sorted([y for _, y in positions])))
+    X, Y = len(xs), len(ys)
+
+    if X * Y != len(positions):
+        raise ValueError("Positions do not form a full rectangular grid.")
+
+    dx = xs[1] - xs[0]
+    dy = ys[1] - ys[0]
+    if not (jnp.allclose(jnp.diff(xs), dx) and jnp.allclose(jnp.diff(ys), dy)):
+        raise ValueError("Coordinates are not evenly spaced.")
+
+    # ---------------------------------------- map flat index <-> (i, j) on the grid
+    pos2idx = {
+        (float(x), float(y)): (i, j) for i, x in enumerate(xs) for j, y in enumerate(ys)
+    }
+    ix = jnp.array([pos2idx[(float(x), float(y))][0] for x, y in positions])
+    iy = jnp.array([pos2idx[(float(x), float(y))][1] for x, y in positions])
+
+    # --------------------------------------------------------- lag‑space distance grid
+    lag_x = jnp.fft.fftfreq(X) * X * dx  # Δx with wrap‑around
+    lag_y = jnp.fft.fftfreq(Y) * Y * dy  # Δy with wrap‑around
+    dxg, dyg = jnp.meshgrid(lag_x, lag_y, indexing="ij")
+    dist = jnp.sqrt(dxg**2 + dyg**2)  # (X, Y)
+    flat_dist = dist.ravel()
+
+    max_r = flat_dist.max()
+    r_bins = jnp.arange(0.0, max_r + dr, dr)
+
+    # which radial shell each lag element belongs to
+    shell_idx = jnp.digitize(flat_dist, r_bins) - 1  # length X*Y
+    counts_per_shell = jnp.bincount(shell_idx, length=r_bins.size)
+
+    # --------------------- helper: radial profile of one flattened 2‑D array --------
+    def radial_profile(flat_vals):
+        sums = jnp.bincount(shell_idx, weights=flat_vals, length=r_bins.size)
+        return sums / jnp.maximum(counts_per_shell, 1)  # avoid 0/0
+
+    # --------------------------------------------------------------------- main call
+    def compute(S: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Parameters
+        ----------
+        S : array, shape (T, N=X*Y)
+
+        Returns
+        -------
+        g_r, r_bins
+        """
+        T, N = S.shape
+        if N != X * Y:
+            raise ValueError(f"Expected N={X*Y}, got {N}")
+
+        # ---------- reshape each frame to (X, Y) grid
+        def to_grid(row):
+            grid = jnp.zeros((X, Y))
+            return grid.at[ix, iy].set(row)
+
+        frames = vmap(to_grid)(S)  # (T, X, Y)
+
+        # ---------- 2‑D autocorrelation per frame + valid flag
+        def ac2d_with_flag(frame):
+            f0 = frame - jnp.mean(frame)
+            var = jnp.mean(f0**2)
+
+            def do_autocorr(_):
+                F = jnp.fft.fft2(f0)
+                C = jnp.fft.ifft2(jnp.abs(F) ** 2).real / (X * Y)
+                return C / C[0, 0]  # C(0)=1
+
+            C_norm = jax.lax.cond(
+                var > 0, do_autocorr, lambda _: jnp.zeros_like(frame), operand=None
+            )
+            return C_norm, var > 0  # (X, Y), scalar bool
+
+        AC_all, valid_flags = vmap(ac2d_with_flag)(frames)  # (T, X, Y), (T,)
+
+        # keep only frames whose variance > 0
+        valid = valid_flags.astype(bool)
+        n_valid = jnp.sum(valid)
+
+        jax.debug.print("radial_autocorrelation: kept {}/{} frames", n_valid, T)
+
+        if n_valid == 0:
+            raise ValueError(
+                "All frames were empty / variance‑zero — nothing to average."
+            )
+
+        AC_valid = AC_all[valid]  # (n_valid, X, Y)
+        AC_flat = AC_valid.reshape(n_valid, -1)  # (n_valid, X*Y)
+
+        # ---------- radial average, then mean across valid frames
+        profiles = vmap(radial_profile)(AC_flat)  # (n_valid, len(r_bins))
+        g_r = jnp.mean(profiles, axis=0)
+
+        return g_r, r_bins
+
+    return compute
 
 
 def monitor(mon):

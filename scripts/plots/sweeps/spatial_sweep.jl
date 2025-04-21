@@ -16,10 +16,10 @@ begin
     begin # FNS parameters
         dx = 0.5
         rho = 20000.0
-        kernel = src.distances.GaussianKernel
-        J_e = 0.0008
-        delta = 3.5
-        nu = 7.0
+        kernel = Dewdrop.distances.GaussianKernel
+        J_e = 0.0007
+        delta = 3.0
+        nu = 8.0
         n_ext = 100
 
         sigma_ee = 0.04
@@ -27,15 +27,14 @@ begin
         sigma_ie = 0.12
         sigma_ii = 0.12
 
-        k = 0.9
-        K_ee = int(130 * k)
-        K_ie = int(180 * k)
-        K_ei = int(200 * k)
-        K_ii = int(250 * k)
+        K_ee = 72
+        K_ie = 66
+        K_ei = 96
+        K_ii = 126
     end
 end
 begin
-    tmax = 25u"s" # * Bump up
+    tmax = 15u"s" # * Bump up
     tmin = 5u"s" # The transient. Simulations always begin at 0
     fixed_params = (; dx, rho, kernel, J_e, n_ext,
                     sigma_ee, sigma_ei, sigma_ie, sigma_ii,
@@ -73,8 +72,10 @@ begin
 
     monitors = ["E.spike"] |> pytuple
     stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
-                      "efficiency" => Dewdrop.stats.efficiency(bin_indices, 1000))
+                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10))
+    #   "radial_autocorrelation" => Dewdrop.stats.radial_autocorrelation(positions,
+    #                                                                    0.05))#,
+    #   "efficiency" => Dewdrop.stats.efficiency(bin_indices, 1000))
     # "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
     #   "temporal_average" => Dewdrop.stats.temporal_average,
     #   "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
@@ -85,7 +86,7 @@ end
 begin# * Generate dict of parameter vectors
     sweep = (;
              delta = range(2.0, 8.0, length = 12),
-             nu = range(6.5, 6.5, length = 1))
+             nu = range(9.5, 9.5, length = 1))
     pnames = map(string, keys(sweep))
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
     sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
@@ -103,46 +104,46 @@ begin # * Run simulation
     stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 6)(pydict(sweep_params))
 end
 begin
-    Dewdrop.stats.save("dewdrop_better_bifurcation.pickle",
+    Dewdrop.stats.save("spatial_sweep.pickle",
                        (stats, sweep_params, fixed_params, metadata))
 end
-if false
-    begin # * Load stats
-        load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("dewdrop_better_bifurcation.pickle")
-    end
-    begin
-        begin # * Extract a ToolsArray of one statistic
-            deltas = sweep_parameters["delta"] |> convert2(Array)
-            nus = sweep_parameters["nu"] |> convert2(Array)
-            deltas = reshape(deltas, (length(unique(deltas)), length(unique(nus))))
-            nus = reshape(nus, (length(unique(deltas)), length(unique(nus))))
-            rate = load_stats["rate"]["E.spike"] |> convert2(Array)
-            rate = reshape(rate, size(deltas)..., size(rate, 2))
-            meanrate = dropdims(mean(rate, dims = 3), dims = 3)
-        end
-        begin
-            f = Figure()
-            ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "ν")
-            colorrange = extrema(meanrate)
-            heatmap!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colorrange,
-                     colormap = :viridis)
-            Colorbar(f[1, 2]; colormap = :viridis, colorrange,
-                     label = "mean rate (Hz)")
-            f
-        end
-    end
+# if false
+#     begin # * Load stats
+#         load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("dewdrop_better_bifurcation.pickle")
+#     end
+#     begin
+#         begin # * Extract a ToolsArray of one statistic
+#             deltas = sweep_parameters["delta"] |> convert2(Array)
+#             nus = sweep_parameters["nu"] |> convert2(Array)
+#             deltas = reshape(deltas, (length(unique(deltas)), length(unique(nus))))
+#             nus = reshape(nus, (length(unique(deltas)), length(unique(nus))))
+#             rate = load_stats["rate"]["E.spike"] |> convert2(Array)
+#             rate = reshape(rate, size(deltas)..., size(rate, 2))
+#             meanrate = dropdims(mean(rate, dims = 3), dims = 3)
+#         end
+#         begin
+#             f = Figure()
+#             ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "ν")
+#             colorrange = extrema(meanrate)
+#             heatmap!(ax, sort(unique(deltas)), sort(unique(nus)), meanrate; colorrange,
+#                      colormap = :viridis)
+#             Colorbar(f[1, 2]; colormap = :viridis, colorrange,
+#                      label = "mean rate (Hz)")
+#             f
+#         end
+#     end
 
-    begin # * Load mua
-        _mua = stats["mua"]["E.spike"] |> convert2(Array)
-        ts = range(tmin, stop = tmax, step = uconvert(u"s", mua_dt))[2:end] |> ustripall
-        deltas = sweep_parameters["delta"] |> convert2(Array)
-    end
-    begin
-        mua = Timeseries(ts, Dim{:delta}(deltas), _mua')
-        mua = mua .- mean(mua, dims = 𝑡)
-        spectra = spectrum(mua)
-    end
-end
+#     begin # * Load mua
+#         _mua = stats["mua"]["E.spike"] |> convert2(Array)
+#         ts = range(tmin, stop = tmax, step = uconvert(u"s", mua_dt))[2:end] |> ustripall
+#         deltas = sweep_parameters["delta"] |> convert2(Array)
+#     end
+#     begin
+#         mua = Timeseries(ts, Dim{:delta}(deltas), _mua')
+#         mua = mua .- mean(mua, dims = 𝑡)
+#         spectra = spectrum(mua)
+#     end
+# end
 # begin
 #     f = Figure(size = (800, 600))
 #     colorrange = extrema(lookup(stats, :omicron)) .+ [0, 0.001]

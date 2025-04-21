@@ -120,7 +120,7 @@ class Spatial(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.002,
+            Delta_g_K=0.004,
             V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
@@ -161,7 +161,7 @@ class Spatial(bp.Network):
             return CSRConn(indices, inptr)
 
         if copy_conn:
-            if isinstance(copy_conn, Dewdrop):
+            if isinstance(copy_conn, Spatial):
                 copy_conn = copy_conn.get_connectivity()
 
             conn_ee = copy_connectivity(copy_conn["E2E"])
@@ -229,8 +229,9 @@ class Spatial(bp.Network):
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
         e_delay = 1.5
-        i_delay = 2.0
+        i_delay = 2.5
 
+        self.key, subkey = jax.random.split(self.key)
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
