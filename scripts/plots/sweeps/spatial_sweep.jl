@@ -14,28 +14,46 @@ set_theme!(foresight(:physics))
 begin
     model = Dewdrop.models.Spatial
     begin # FNS parameters
+        # dx = 0.5
+        # rho = 20000.0
+        # kernel = Dewdrop.distances.GaussianKernel
+        # J_e = 0.0007
+        # delta = 3.0
+        # nu = 8.0
+        # n_ext = 100
+
+        # sigma_ee = 0.04
+        # sigma_ei = 0.05
+        # sigma_ie = 0.12
+        # sigma_ii = 0.12
+
+        # K_ee = 72
+        # K_ie = 66
+        # K_ei = 96
+        # K_ii = 126
+
         dx = 0.5
         rho = 20000.0
         kernel = Dewdrop.distances.GaussianKernel
-        J_e = 0.0007
-        delta = 3.0
+        J_e = 0.00065
+        delta = 4.0
         nu = 8.0
         n_ext = 100
 
         sigma_ee = 0.04
-        sigma_ei = 0.05
-        sigma_ie = 0.12
-        sigma_ii = 0.12
+        sigma_ei = 0.09
+        sigma_ie = 0.13
+        sigma_ii = 0.13
 
-        K_ee = 72
-        K_ie = 66
-        K_ei = 96
-        K_ii = 126
+        K_ee = 75
+        K_ie = 80
+        K_ei = 90
+        K_ii = 100
     end
 end
 begin
-    tmax = 15u"s" # * Bump up
-    tmin = 5u"s" # The transient. Simulations always begin at 0
+    tmax = 30u"s" # * Bump up
+    tmin = 10u"s" # The transient. Simulations always begin at 0
     fixed_params = (; dx, rho, kernel, J_e, n_ext,
                     sigma_ee, sigma_ei, sigma_ie, sigma_ii,
                     K_ee, K_ie, K_ei, K_ii)
@@ -85,8 +103,8 @@ begin
 end
 begin# * Generate dict of parameter vectors
     sweep = (;
-             delta = range(2.0, 8.0, length = 12),
-             nu = range(9.5, 9.5, length = 1))
+             delta = range(3.0, 4.0, length = 25),
+             nu = range(8.0, 8.0, length = 1))
     pnames = map(string, keys(sweep))
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
     sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
@@ -101,7 +119,7 @@ begin # * Create sweep function
     stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 6)(pydict(sweep_params))
+    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 5)(pydict(sweep_params))
 end
 begin
     Dewdrop.stats.save("spatial_sweep.pickle",
