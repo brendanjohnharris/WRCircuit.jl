@@ -120,8 +120,8 @@ class Spatial(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.004,
-            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
+            Delta_g_K=0.001,
+            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
         )
@@ -139,7 +139,7 @@ class Spatial(bp.Network):
             V_K=-85.0,
             tau_K=60.0,
             Delta_g_K=0.0,  # No adaptation for inhibitory neurons
-            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
+            V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
             embedding=inh_positions,
         )

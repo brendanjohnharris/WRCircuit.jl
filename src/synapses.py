@@ -158,7 +158,7 @@ class Synapse(bp.Projection):
             # syn=bp.dyn.AMPA.desc(
             #     pre.num, alpha=1 / tau_r, beta=1 / tau_d, T=tau_r, T_dur=tau_r
             # ),
-            # !!! YIFAN USES AMPA SYNAPSE, SHENCONG USES DUAL EXPONENTIAL SYNAPSE. MF!
+            # !!! YIFAN USES AMPA SYNAPSE, SHENCONG USES DUAL EXPONENTIAL SYNAPSE.
             syn=bp.dyn.DualExponV2.desc(
                 pre.num,
                 tau_decay=tau_d,
