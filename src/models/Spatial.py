@@ -45,22 +45,31 @@ class Spatial(bp.Network):
 
     def __init__(
         self,
-        rho=30000,  # Density of Exc. neurons (neurons per mm^2)
-        dx=1.0,  # Width of the spatial domain (mm)
-        sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
-        sigma_ei=0.1,
-        sigma_ie=0.1,
-        sigma_ii=0.125,
-        K_ee=72,
-        K_ei=88,
-        K_ie=28,
-        K_ii=39,
+        rho=20000,  # Density of Exc. neurons (neurons per mm^2)
+        dx=0.5,  # Width of the spatial domain (mm)
+        sigma_ee=0.075,  # Width of the distance-dependent connectivity kernel (mm)
+        sigma_ei=0.095,
+        sigma_ie=0.19,
+        sigma_ii=0.19,
+        K_ee=270,
+        K_ei=350,
+        K_ie=130,
+        K_ii=180,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
-        delta=4,  # Per-neuron synaptic weight I:E ratio
-        nu=1,  # External population firing rate
-        n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,
-        kernel=GaussianKernel,
+        nu=6.5,  # External population firing rate
+        n_ext=100,  # Number of external synapses per Exc. neuron
+        delta=4.0,
+        J_ee=0.00105,  # Mean weight of excitatory synapses to excitatory neurons
+        J_ei=0.00145,
+        tau_r_e=1.0,
+        tau_r_i=1.0,
+        tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
+        tau_d_i=4.5,  # 3.0 for yifan, # 4.5 for shencong
+        V_rev_e=0.0,  # Reversal potential for excitatory synapses
+        V_rev_i=-80.0,  # Makes the inhibitory synapses inhibitory
+        e_delay=1.5,  # Synaptic delay. Shencong uses uniform dist. between 0.5 and 2.5
+        i_delay=1.5,
+        kernel=ExponentialKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
         copy_conn=False,  # Whether to copy connectivity from the provided Dewdrop
@@ -74,11 +83,13 @@ class Spatial(bp.Network):
         self.sigma_ie = sigma_ie
         self.sigma_ii = sigma_ii
         self.gamma = gamma
-        self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
-        self.J_e = J_e
-        self.J_i = self.J_e * delta
+
+        self.delta = delta
+        self.J_ee = J_ee
+        self.J_ei = J_ei
+
         self.method = method
         self.kernel = kernel
         self.key = key
@@ -96,6 +107,15 @@ class Spatial(bp.Network):
         self.p_ei = kernel.mass2pmax(self.omega_ei, self.sigma_ei)
         self.p_ie = kernel.mass2pmax(self.omega_ie, self.sigma_ie)
         self.p_ii = kernel.mass2pmax(self.omega_ii, self.sigma_ii)
+
+        self.tau_r_e = tau_r_e
+        self.tau_r_i = tau_r_i
+        self.tau_d_e = tau_d_e
+        self.tau_d_i = tau_d_i
+        self.V_rev_e = V_rev_e
+        self.V_rev_i = V_rev_i
+        self.e_delay = e_delay
+        self.i_delay = i_delay
 
         # geometry
         A = dx**2
@@ -125,6 +145,11 @@ class Spatial(bp.Network):
             method=method,
             embedding=exc_positions,
         )
+
+        # Shencong uses independent parameter delta_e and delta_i, decoupling J_ie and J_ii.
+        # We can account for this by tuning Ks later
+        self.J_ie = (J_ee * K_ee) * self.delta / K_ie
+        self.J_ii = (J_ei * K_ei) * self.delta / K_ii
 
         # Create a population of inhibitory neurons
         self.key, subkey = jax.random.split(self.key)
@@ -221,16 +246,6 @@ class Spatial(bp.Network):
             conn_exti = FixedProb(prob=p_ext, seed=subkey)
 
         # Synapses
-        tau_r_e = 1.0
-        tau_r_i = 1.0
-        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
-        V_rev_e = 0.0
-        V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
-
-        e_delay = 1.5
-        i_delay = 2.5
-
         self.key, subkey = jax.random.split(self.key)
         self.E2E = Synapse(
             pre=self.E,
@@ -295,8 +310,8 @@ class Spatial(bp.Network):
             conn=conn_exte,
             delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
+            g_max=self.J_ee,
+            tau_r=tau_r_e,
             V_rev=V_rev_e,
         )
         self.ext2I = Synapse(
@@ -305,8 +320,8 @@ class Spatial(bp.Network):
             conn=conn_exti,
             delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
+            g_max=self.J_ei,
+            tau_r=tau_r_e,
             V_rev=V_rev_e,
         )
 
@@ -317,40 +332,42 @@ class Spatial(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.delta, self.J_e)
+        self.reinit_weights(self.delta, (self.J_ee, self.J_ei))
 
     def reinit_weights(self, delta=None, J_e=None):
         if delta is not None:
             self.delta = delta
         if J_e is not None:
-            self.J_e = J_e
-        self.J_i = self.J_e * self.delta
+            self.J_ee = J_e[0]
+            self.J_ei = J_e[1]
+        self.J_ie = self.J_ee * self.delta
+        self.J_ii = self.J_ei * self.delta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(
             self.E2E.proj,
-            self.J_e,
+            self.J_ee,
             self.N_e,
             subkey,  # ? Need to pass N_ee to keep this function jittable.
         )
         self.key, subkey = jax.random.split(self.key)
         self.E2I.proj.comm.weight = correlate_weights(
-            self.E2I.proj, self.J_e, self.N_i, subkey
+            self.E2I.proj, self.J_ei, self.N_i, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.I2E.proj.comm.weight = correlate_weights(
-            self.I2E.proj, self.J_i, self.N_e, subkey
+            self.I2E.proj, self.J_ie, self.N_e, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.I2I.proj.comm.weight = correlate_weights(
-            self.I2I.proj, self.J_i, self.N_i, subkey
+            self.I2I.proj, self.J_ii, self.N_i, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.ext2E.proj.comm.weight = correlate_weights(
-            self.ext2E.proj, self.J_e, self.N_e, subkey
+            self.ext2E.proj, self.J_ee, self.N_e, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.ext2I.proj.comm.weight = correlate_weights(
-            self.ext2I.proj, self.J_e, self.N_i, subkey
+            self.ext2I.proj, self.J_ei, self.N_i, subkey
         )
         self.reset_state()  ## or bp.reset_state(self)??
 

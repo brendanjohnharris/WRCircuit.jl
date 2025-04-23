@@ -49,44 +49,6 @@ def maybe_initializer(x, exclude=["rng"]):
         return x
 
 
-# class ReversePooling(bp.initialize._InterLayerInitializer):
-#     """Initialize weights with the reverse pooling method, Gu et al. 2018"""
-
-#     def __init__(self, seed=None):
-#         super().__init__()
-#         self.rng = bm.random.default_rng(seed, clone=False)
-#         ......other parameters..............
-
-#     def construct(self, indices, indptr):
-#         """
-#         Construct the weights using the reverse pooling method, given the CSR indices of the
-#         adjacency matrix
-#         """
-
-#     def __call__(self, shape, dtype=None):
-#         shape = bp.initialize._format_shape(shape)
-#         assert self.weights.shape() == shape, "Shape mismatch between cached weights and desired shape."
-#         return bm.asarray(self.weights, dtype=dtype)
-
-
-# class JointCSRLinear(bp.dnn.CSRLinear):
-#     """
-#     Same as CSRLinear, but with the option to have conneciton weights that are a function of
-#     the adjacency matrix.
-#     """
-
-#     def __init__(
-#         self,
-#         conn: bp.connect.TwoEndConnector,
-#         weight: Union[float, ArrayType, Callable],
-#         **kwargs
-#     ):
-#         super().__init__(
-#             conn=conn, weight=1.0, **kwargs
-#         )  # Weights are set to 1.0 intially, then updated later
-#         self.indices, self.indptr
-
-
 class ScaledInitializer(_InterLayerInitializer):
     """A wrapper that scales the output of any initializer by a constant factor.
 

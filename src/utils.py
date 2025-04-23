@@ -212,3 +212,11 @@ def draw_lognormal(mu, sigma, size):
     _mu = jnp.log(mu**2 / jnp.sqrt(mu**2 + sigma**2))
     _sigma = jnp.sqrt(jnp.log(1 + (sigma**2 / mu**2)))
     return bp.math.random.lognormal(_mu, _sigma, size)
+
+
+def scale_dual_exp(w, tau_r, tau_d):
+    """
+    Convert from Shencong's 'delta increase per spike' to the usual 'maximum of dual exp'
+    """
+    g_max = w * (tau_r / tau_d) ** (tau_d / (tau_d - tau_r))
+    return g_max
