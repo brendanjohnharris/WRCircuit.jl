@@ -34,27 +34,26 @@ begin
 
         dx = 0.5
         rho = 20000.0
-        kernel = Dewdrop.distances.GaussianKernel
-        J_e = 0.00065
+        kernel = Dewdrop.distances.ExponentialKernel
         delta = 4.0
-        nu = 8.0
-        n_ext = 100
+        nu = 4.5  # External population firing rate
+        n_ext = 100  # Number of external synapses per Exc. neuron
 
-        sigma_ee = 0.04
-        sigma_ei = 0.09
-        sigma_ie = 0.13
-        sigma_ii = 0.13
+        sigma_ee = 0.075  # Width of the distance-dependent connectivity kernel (mm)
+        sigma_ei = 0.095
+        sigma_ie = 0.19
+        sigma_ii = 0.19
 
-        K_ee = 75
-        K_ie = 80
-        K_ei = 90
-        K_ii = 100
+        K_ee = 270
+        K_ei = 350
+        K_ie = 165
+        K_ii = 200
     end
 end
 begin
     tmax = 30u"s" # * Bump up
     tmin = 10u"s" # The transient. Simulations always begin at 0
-    fixed_params = (; dx, rho, kernel, J_e, n_ext,
+    fixed_params = (; dx, rho, kernel, n_ext,
                     sigma_ee, sigma_ei, sigma_ie, sigma_ii,
                     K_ee, K_ie, K_ei, K_ii)
 
@@ -103,7 +102,7 @@ begin
 end
 begin# * Generate dict of parameter vectors
     sweep = (;
-             delta = range(3.0, 4.0, length = 25),
+             delta = range(3.0, 5.0, length = 25),
              nu = range(8.0, 8.0, length = 1))
     pnames = map(string, keys(sweep))
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
@@ -119,7 +118,7 @@ begin # * Create sweep function
     stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 5)(pydict(sweep_params))
+    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 3)(pydict(sweep_params))
 end
 begin
     Dewdrop.stats.save("spatial_sweep.pickle",
