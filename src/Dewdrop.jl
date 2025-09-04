@@ -28,8 +28,8 @@ begin # * Python imports
 end
 
 function __init__()
-    push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/"))
-    dlopen("libcudnn")
+    # push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/"))
+    # dlopen("libcudnn")
 
     pycopy!(sys, pyimport("sys"))
     sys.path.append(pwd())

@@ -125,7 +125,11 @@ def progress_vmap(
                 res_tree = batch_tree
 
             # Store batch results
-            all_batch_results.append(batch_values)
+            if clear_buffer:
+                all_batch_results.append([np.asarray(val) for val in batch_values])
+                bm.clear_buffer_memory()
+            else:
+                all_batch_results.append(batch_values)
 
         # Handle empty results
         if not all_batch_results:

@@ -29,10 +29,13 @@ macro preamble()
 end
 @preamble
 
+plotdir(args...) = projectdir("plots", args...)
+export plotdir
+
 const connector = '&'
 
-const UnivariateSpikeTrain = Base.typeintersect(SpikeTrain, UnivariateTimeSeries)
-const MultivariateSpikeTrain = Base.typeintersect(SpikeTrain, MultivariateTimeSeries)
+const UnivariateSpikeTrain = Base.typeintersect(SpikeTrain, UnivariateTimeseries)
+const MultivariateSpikeTrain = Base.typeintersect(SpikeTrain, MultivariateTimeseries)
 function firingrate(x::UnivariateSpikeTrain)
     λ = sum(x) / duration(x)
     uconvert(unit(eltype(x)) * u"Hz", λ)
@@ -74,13 +77,13 @@ function bootstrapaverage(average, x::AbstractVector{T}; confint = 0.95,
 end
 
 function bootstrapaverage(average, X::AbstractArray; dims = 1, kwargs...)
-    ds = [i == dims ? 1 : Colon() for i in 1:ndims(X)]
+    ds = [i ∈ dims ? 1 : Colon() for i in 1:ndims(X)]
     μ = similar(X[ds...])
     σl = similar(μ)
     σh = similar(μ)
-    negdims = filter(!=(dims), 1:ndims(X)) |> Tuple
+    negdims = filter(!∈(dims), 1:ndims(X)) |> Tuple
     Threads.@threads for (i, x) in collect(enumerate(eachslice(X; dims = negdims)))
-        μ[i], (σl[i], σh[i]) = bootstrapaverage(average, x; kwargs...)
+        μ[i], (σl[i], σh[i]) = bootstrapaverage(average, x[:]; kwargs...)
     end
     return μ, (σl, σh)
 end
@@ -99,10 +102,10 @@ end
 function structurefunction(x::AbstractVector, τ::Int)
     Δ = @views x[(τ + 1):end] - x[1:(end - τ)]
 end
-function structurefunction(x::RegularTimeSeries, τ::Int; kwargs...)
+function structurefunction(x::RegularTimeseries, τ::Int; kwargs...)
     structurefunction(parent(x), τ; kwargs...)
 end
-function structurefunction(x::RegularTimeSeries, τ::AbstractFloat)
+function structurefunction(x::RegularTimeseries, τ::AbstractFloat)
     structurefunction(x, Int(τ ÷ step(x)); kwargs...)
 end
 function structurefunction(x::AbstractArray, τs)
@@ -120,7 +123,7 @@ function histcounts(x, edges)
 end
 
 # * Move to TimeseriesTools
-function timebins(x::RegularTimeSeries, τ::Number)
+function timebins(x::RegularTimeseries, τ::Number)
     un = unit(eltype(times(x)))
     if unit(τ) != un && unit(τ) == NoUnits
         τ = τ * un
@@ -129,7 +132,7 @@ function timebins(x::RegularTimeSeries, τ::Number)
     tbins = [i .. i + τ for i in tbins]
     x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
 end
-function TimeseriesTools.coarsegrain(x::RegularTimeSeries, τ::Number)
+function TimeseriesTools.coarsegrain(x::RegularTimeseries, τ::Number)
     negdims = setdiff(1:ndims(x), dimnum(x, 𝑡))
     x = timebins(x, τ)
     x = eachslice.(x; dims = negdims |> Tuple) |> stack
@@ -226,7 +229,7 @@ function unitarylfp(times, spikes, spike_type;
     exp_mat = @. exp(-time_mat^2 / τ)
     weighted = amps .* exp_mat
     x = vec(sum(weighted, dims = 1))
-    return TimeseriesTools.TimeSeries(times .* u"ms", x)
+    return TimeseriesTools.Timeseries(times .* u"ms", x)
 end
 
 # * Working with 'pytrees'

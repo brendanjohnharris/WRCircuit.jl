@@ -18,7 +18,7 @@ using USydClusters
 using Term
 using SparseArrays
 
-model = models.balanced.FNSPopulations
+model = Dewdrop.models.balanced.FNSPopulations
 modelname = "Balanced"
 
 begin # * Fixed parameters

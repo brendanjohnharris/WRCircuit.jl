@@ -7,17 +7,7 @@ using DrWatson
 DrWatson.@quickactivate
 using Dewdrop
 using JLD2
-Dewdrop.@preamble
-set_theme!(foresight(:physics))
-#! /bin/bash
-# -*- mode: julia -*-
-#=
-exec $HOME/build/julia-1.11.2/bin/julia -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
-=#
-using DrWatson
-DrWatson.@quickactivate
-using Dewdrop
-using JLD2
+using DataInterpolations
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
@@ -29,30 +19,138 @@ begin # * Load stats
     mua_dt = metadata[:mua_dt].val |> convert2(Float32)
     mua_dt = mua_dt / 1000
 end
+function extract_statistic(stat, sweep_parameters)
+    maybescalar(x) = length(x) == 1 ? only(x) : x
+    maybecollect(x) = isa(x, Number) ? x : collect(x)
+    stat = map(maybecollect, stat)
+    paramnames = sweep_parameters |> collect .|> Symbol
+    params = sweep_parameters.values() |> collect .|> convert2(Array) .|> eachrow
+
+    paramdims = unique.(params) .|> sort
+    paramgrid = Iterators.product(paramdims...) |> collect
+    X = Array{Union{Missing, eltype(stat)}}(missing, length.(paramdims)...)
+
+    for (i, param) in enumerate(zip(params...))
+        idx = findfirst(==(param), paramgrid)
+        X[idx] = stat[i] |> maybecollect
+    end
+    ddims = [Dim{Symbol(n)}(maybescalar.(p)) for (n, p) in zip(paramnames, paramdims)] |>
+            Tuple
+    return ToolsArray(X, ddims)
+end
+
+begin # * Set up figure
+    fig = Figure(size = (600, 2000))
+    gs = subdivide(fig, 4, 1)
+end
+
+begin # * Mean rate
+    rate = load_stats["rate"]["E.spike"] |> convert2(Array) |> eachrow
+    rate = extract_statistic(rate, sweep_parameters)
+    meanrate = mean.(rate)
+    _μ, (_σₗ, _σₕ) = bootstrapaverage(mean, meanrate, dims = (1, 2))
+end
 begin
-    begin # * Extract a ToolsArray of one statistic
-        deltas = sweep_parameters["delta"] |> convert2(Array)
-        deltas = reshape(deltas, (length(unique(deltas)),))
-        rate = load_stats["rate"]["E.spike"] |> convert2(Array)
-        rate = reshape(rate, size(deltas)..., size(rate, 2))
-        meanrate = dropdims(mean(rate, dims = 2), dims = 2)
+    μ = upsample(_μ, 10)
+    σₗ = upsample(_σₗ, 10)
+    σₕ = upsample(_σₕ, 10)
+
+    f = gs[1]
+    ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "Mean rate (Hz)")
+    band!(ax, lookup(σₗ)[1], collect.([σₗ, σₕ])...; alpha = 0.3)
+    rangebars!(ax, lookup(_σₗ)[1], collect.([_σₗ, _σₕ])...; alpha = 0.3, linewidth = 1,
+               whiskerwidth = 3)
+    lines!(ax, μ; alpha = 0.85)
+    scatter!(ax, _μ; alpha = 0.85)
+    f
+end
+
+begin # * Susceptibility
+    susceptibility = load_stats["susceptibility"]["E.spike"] |> convert2(Array)
+    susceptibility = extract_statistic(susceptibility, sweep_parameters)
+    _μ, (_σₗ, _σₕ) = bootstrapaverage(mean, susceptibility, dims = (1, 2))
+end
+begin
+    μ = upsample(_μ, 10)
+    σₗ = upsample(_σₗ, 10)
+    σₕ = upsample(_σₕ, 10)
+
+    f = gs[2]
+    ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "Susceptibility")
+    band!(ax, lookup(σₗ)[1], collect.([σₗ, σₕ])...; alpha = 0.3)
+    rangebars!(ax, lookup(_σₗ)[1], collect.([_σₗ, _σₕ])...; alpha = 0.3, linewidth = 1,
+               whiskerwidth = 3)
+    lines!(ax, μ; alpha = 0.85)
+    scatter!(ax, _μ; alpha = 0.85)
+    f
+end
+
+begin # * Load mua
+    mua = load_stats["mua"]["E.spike"] |> convert2(Array) |> eachrow
+    mua = extract_statistic(mua, sweep_parameters)
+    ts = range(tmin, stop = tmax, step = mua_dt)[2:end] |> ustripall
+    ts = 𝑡(ts)
+    mua = ToolsArray.(mua, ((ts,),))
+end
+begin # * Power spectrum
+    S = map(mua) do x
+        x = x .- mean(x)
+        x = x[𝑡 = IntervalSets.OpenInterval(0, 250)]
+        x = spectrum(x, 0.8, padding = 500)
     end
-    begin
-        f = Figure()
-        ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "mean rate (Hz)")
-        lines!(ax, sort(unique(deltas)), meanrate[:]; alpha = 0.85)
-        f |> display
+    S = stack(S)
+    _μ, (_σₗ, _σₕ) = bootstrapaverage(mean, S, dims = (2, 3))
+end
+begin
+    f = gs[3]
+    ax = Axis(f[1, 1]; xlabel = "Frequency (Hz)", ylabel = "Spectral density",
+              yscale = log10, xscale = log10, limits = ((nothing, 250), nothing))
+    deltas = lookup(_μ, :delta)[1:2:end]
+    map(deltas) do δ
+        μ = _μ[delta = At(δ)]
+        σₗ = _σₗ[delta = At(δ)]
+        σₕ = _σₕ[delta = At(δ)]
+        lines!(ax, μ; alpha = 0.85, color = δ, colorrange = extrema(deltas),
+               colormap = sunrise |> reverse)
     end
-    begin # * Susceptibility
-        susceptibility = load_stats["susceptibility"]["E.spike"] |> convert2(Array)
-        susceptibility = reshape(susceptibility, size(deltas)..., size(susceptibility, 2))
-        mean_susceptibility = dropdims(mean(susceptibility, dims = 2), dims = 2)
-        f = Figure()
-        ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "susceptibility")
-        lines!(ax, sort(unique(deltas)), mean_susceptibility[:]; alpha = 0.85)
-        f
+    Colorbar(f[1, 2]; colormap = sunrise |> reverse, colorrange = extrema(deltas),
+             label = "δ")
+    f
+end
+
+begin # * Spectral tail exponent
+    α = map(eachslice(S, dims = (:key, :nu, :delta))) do s
+        # * Fit a fooof model, ensuring log-linear spacing
     end
 end
+begin # * Grand distribution
+    G, bins = load_stats["grand_distribution"]["E.input"] .|> convert2(Array)
+    G = extract_statistic(G |> eachrow, sweep_parameters)
+    bins = extract_statistic(bins |> eachrow, sweep_parameters)
+    b = mean(bins)
+    G = map(G) do g
+        ToolsArray(g, (Dim{:bin}(b),))
+    end
+    G = stack(G)
+    G = mean(G, dims = (2, 3))
+    G = dropdims(G, dims = (2, 3))
+end
+begin
+    deltas = lookup(G, :delta)[1:4:end]
+    f = gs[4]
+    ax = Axis(f[1, 1]; xlabel = "Input", ylabel = "Frequency", yscale = log10,
+              xscale = Makie.pseudolog10)
+    map(deltas) do δ
+        g = G[delta = At(δ)]
+        lines!(ax, g; alpha = 0.85, color = δ, colorrange = extrema(deltas),
+               colormap = sunrise |> reverse)
+    end
+    Colorbar(f[1, 2]; colormap = sunrise |> reverse, colorrange = extrema(deltas),
+             label = "δ")
+    f
+end
+display(fig)
+save(plotdir("plot_spatial_sweep", "spatial_sweep.pdf"), fig)
 
 # begin # * Load mua
 #     _mua = load_stats["mua"]["E.spike"] |> convert2(Array)
@@ -84,4 +182,3 @@ end
 #     heatmap!(ax, x, colormap = (pelagic |> reverse))
 #     f
 # end
-

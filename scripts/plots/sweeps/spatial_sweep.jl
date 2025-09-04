@@ -36,7 +36,7 @@ begin
         rho = 20000.0
         kernel = Dewdrop.distances.ExponentialKernel
         delta = 4.0
-        nu = 4.5  # External population firing rate
+        nu = 4.5 # External population firing rate
         n_ext = 100  # Number of external synapses per Exc. neuron
 
         sigma_ee = 0.075  # Width of the distance-dependent connectivity kernel (mm)
@@ -51,7 +51,7 @@ begin
     end
 end
 begin
-    tmax = 30u"s" # * Bump up
+    tmax = 50u"s" # * Bump up
     tmin = 10u"s" # The transient. Simulations always begin at 0
     fixed_params = (; dx, rho, kernel, n_ext,
                     sigma_ee, sigma_ei, sigma_ie, sigma_ii,
@@ -78,38 +78,43 @@ begin
         push!(bin_indices[bx, by], neuron_idx)
     end
 
-    # radius = 0.1 # mm
-    # origin = [dx / 2, dx / 2]
-    # mask = map(positions) do pos
-    #     dp = abs.(pos .- origin)
-    #     dp = min.(dp, dx .- dp)
-    #     norm(dp) < radius
-    # end # scatter(positions.|> Point2f, color=mask) to check
-    # local_idxs = findall(mask) |> Dewdrop.numpy.asarray
+    radius = 0.1 # mm
+    origin = [dx / 2, dx / 2]
+    mask = map(positions) do pos
+        dp = abs.(pos .- origin)
+        dp = min.(dp, dx .- dp)
+        norm(dp) < radius
+    end # scatter(positions.|> Point2f, color=mask) to check
+    local_idxs = findall(mask) |> Dewdrop.numpy.asarray
 
-    monitors = ["E.spike"] |> pytuple
+    monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
     stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10))
-    #   "radial_autocorrelation" => Dewdrop.stats.radial_autocorrelation(positions,
-    #                                                                    0.05))#,
-    #   "efficiency" => Dewdrop.stats.efficiency(bin_indices, 1000))
-    # "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
-    #   "temporal_average" => Dewdrop.stats.temporal_average,
-    #   "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
-    #   "mua" => mua_func)
+                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
+                      #   "radial_autocorrelation" => Dewdrop.stats.radial_autocorrelation(positions,
+                      #                                                                    0.05))#,
+                      #   "efficiency" => Dewdrop.stats.efficiency(bin_indices, 1000))
+                      # "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => Dewdrop.stats.temporal_average,
+                      "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
+                      "mua" => mua_func)
 
     metadata = (; positions, bin_indices, mua_dt, tmax, tmin, monitors)
 end
 begin# * Generate dict of parameter vectors
+    n_repeats = 5 # The combination of key x other params will be unique
+    repeat_keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42),
+                                           n_repeats)
+
     sweep = (;
-             delta = range(3.0, 5.0, length = 25),
-             nu = range(8.0, 8.0, length = 1))
+             delta = range(2.5, 5.5, length = 16),
+             nu = range(nu, nu, length = 1),
+             key = repeat_keys)
+
     pnames = map(string, keys(sweep))
-    pvals = stack(Iterators.product(values(sweep)...), dims = 1)
-    sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
-    n_iters = length(first(values(sweep_params)))
-    jax_keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42), n_iters)
-    sweep_params["key"] = Dewdrop.numpy.array.(jax_keys) # * So that each run is independent
+    pvals = Iterators.product(values(sweep)...)
+    sweep_params = zip(pnames, [getindex.(pvals, i) for i in eachindex(first(pvals))])
+    sweep_params = Dict{String, Any}(sweep_params) # Now a good shape for jax
+    sweep_params["key"] = Dewdrop.numpy.stack(Dewdrop.numpy.array.(sweep_params["key"])) # * Required to be a fully python array
 end
 begin # * Create sweep function
     run = Dewdrop.stats.create_run(model, pydict(fixed_params), monitors,
@@ -118,7 +123,7 @@ begin # * Create sweep function
     stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 3)(pydict(sweep_params))
+    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 4)(pydict(sweep_params))
 end
 begin
     Dewdrop.stats.save("spatial_sweep.pickle",
