@@ -229,7 +229,7 @@ function unitarylfp(times, spikes, spike_type;
     exp_mat = @. exp(-time_mat^2 / τ)
     weighted = amps .* exp_mat
     x = vec(sum(weighted, dims = 1))
-    return TimeseriesTools.Timeseries(times .* u"ms", x)
+    return TimeseriesTools.Timeseries(x, times * u"ms")
 end
 
 # * Working with 'pytrees'

@@ -4,6 +4,7 @@ using DrWatson
 # using cuDNN
 using Libdl
 using PythonCall
+using CondaPkg
 import PythonCall: pycopy!
 
 export convert2, jax_device
@@ -28,8 +29,12 @@ begin # * Python imports
 end
 
 function __init__()
-    # push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/"))
-    # dlopen("libcudnn")
+    if CondaPkg.backend() === :MicroMamba
+        push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/")) # ! must use MicroMamba backend
+        dlopen("libcudnn")
+    else
+        throw(error("Dewdrop.jl requires the MicroMamba backend for CondaPkg.jl. Set this using Preferences or an environment variable."))
+    end
 
     pycopy!(sys, pyimport("sys"))
     sys.path.append(pwd())

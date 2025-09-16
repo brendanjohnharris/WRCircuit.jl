@@ -35,7 +35,7 @@ function bpformat(runner; populations, vars, transient)
     _X = [runner.mon[m].view() |> convert2(PyArray) for m in monitors]
     X = map(_X, ps) do x, (p, v)
         vs = Symbol.(["$p"] .* string.(1:size(x, 2)))
-        Timeseries(t, Neuron(vs), x)[𝑡(OpenInterval(transient, Inf * u"s"))]
+        Timeseries(x, t, Neuron(vs))[𝑡(OpenInterval(transient, Inf * u"s"))]
     end
     X = reshape(X, length(populations), length(vars))
     X = ToolsArray(X, (Population(populations), Var(vars)))

@@ -125,7 +125,7 @@ if false
         deltas = sweep_parameters["delta"] |> convert2(Array)
     end
     begin
-        mua = Timeseries(ts, Dim{:delta}(deltas), _mua')
+        mua = Timeseries(_mua', ts, Dim{:delta}(deltas))
         mua = mua .- mean(mua, dims = 𝑡)
         spectra = spectrum(mua)
     end
