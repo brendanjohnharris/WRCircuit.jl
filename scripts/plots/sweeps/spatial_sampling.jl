@@ -80,12 +80,29 @@ end
 begin # * The idea is to randomly sample some parameters from discretized parameter distributions. This script can be left running to populate the model cache.
     # * Start by defining parameter ranges to sample from
     parameter_grid = [
-        Dim{:delta}(range(1, 9, length = 32)),
-        Dim{:nu}(range(2, 6, length = 16))
+        Dim{:delta}(range(1, 9, length = 16)),
+        # Dim{:nu}(range(2, 6, length = 16)),
+        # Dim{:sigma_ee}(range(0.04, 0.1, length = 8)),
+        # Dim{:sigma_ei}(range(0.04, 0.12, length = 8)),
+        # Dim{:sigma_ie}(range(0.1, 0.2, length = 8)),
+        # Dim{:sigma_ii}(range(0.2, 0.2, length = 8)),
+        Dim{:K_ee}(round.(Int, range(100, 400, length = 16))),
+        Dim{:K_ei}(round.(Int, range(200, 500, length = 16))),
+        Dim{:K_ie}(round.(Int, range(100, 300, length = 16))),
+        Dim{:K_ii}(round.(Int, range(100, 300, length = 16)))
+        # Dim{:J_ee}(range(0.0005, 0.0015, length = 16)),
+        # Dim{:J_ei}(range(0.0005, 0.002, length = 16)),
+        # Dim{:tau_r_e}(range(0.5, 3.0, length = 8)),
+        # Dim{:tau_r_i}(range(0.5, 3.0, length = 8)),
+        # Dim{:tau_d_e}(range(2.0, 8.0, length = 8)),
+        # Dim{:tau_d_i}(range(2.0, 8.0, length = 8))
     ]
 
     parameter_grid = map(parameter_grid) do d
-        round.(d, sigdigits = 3)
+        if eltype(d) <: AbstractFloat
+            d = round.(d, sigdigits = 3)
+        end
+        return d
     end
 
     parameter_grid = Iterators.product(parameter_grid...) |> collect
@@ -137,7 +154,6 @@ while true
         end
     end
     begin # * Format the monitors
-        # watchkeys = pyconvert(Vector{String}, stats.keys())
         res = Dewdrop.bpformat(stats["monitor"], sweep_parameters; transient, tmax)
     end
 

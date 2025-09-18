@@ -26,9 +26,9 @@ begin
         K_ie = 165
         K_ii = 200
         delta = 3.0
-        nu = 4.5
+        nu = 5.0
         n_ext = 100
-        J_ee = 0.00105 # 0.00105
+        J_ee = 0.0010 # 0.00105
         J_ei = 0.00145
         tau_r_i = 2.0
         tau_d_i = 5.0
@@ -36,8 +36,8 @@ begin
 end
 
 begin
-    tmax = 30u"s" # * Bump up
-    tmin = 10u"s" # The transient. Simulations always begin at 0
+    tmax = 10u"s" # * Bump up
+    tmin = 5u"s" # The transient. Simulations always begin at 0
     fixed_params = (; rho,
                     dx,
                     sigma_ee,
@@ -70,7 +70,7 @@ end
 
 begin # * Animate
     spikes = x[Population = At(:E), Var = At(:spike)]
-    dt = 10.0u"ms"
+    dt = 50.0u"ms"
     function group_dt(x::T, dt::T) where {T}
         round(x / dt) * dt
     end
@@ -107,17 +107,19 @@ begin # * Animate
     p = scatter!(ax, Point2f.(positions); markersize = 5, color, colormap,
                  colorrange = (0, ustrip(maximum(rates))))
     Colorbar(f[1, 2], p; label = "Firing rate (Hz)")
-    record(f, "critical_demo.mp4", lookup(rates, 𝑡)) do t
+    record(f, "critical_demo.mp4", lookup(rates, 𝑡), framerate = 12) do t
         r = rates[𝑡 = At(t)] |> ustrip
         color[] = r
     end
 end
 
 begin # * Power spectrum of rate fluctuations
-    V = x[Population = At(:E), Var = At(:V)][1:10:end]
+    V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
+    V = set(V, 𝑡 => uconvert.(u"s", times(V)))
+    V = rectify(V, dims = 𝑡)
     lines(V[:, 1]) |> display
     s = spectrum(V)
     s = mean(s, dims = Neuron)
-    s = dropdims(s, dims = Neuron)[2:end]
+    s = dropdims(s, dims = Neuron)[5:end]
     lines(s |> ustripall; axis = (; xscale = log10, yscale = log10))
 end
