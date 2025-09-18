@@ -241,6 +241,7 @@ function pytree2dict(d::Dict)
             delete!(d, k)
             k = _k
         end
+        k = Symbol(k)
         if v isa Dict
             d[k] = pytree2dict(v)
         elseif string(pytype(v)) == "<class 'dict'>"
@@ -249,13 +250,31 @@ function pytree2dict(d::Dict)
             d[k] = pyconvert(Array, v)
         elseif string(pytype(v)) == "<class 'numpy.ndarray'>"
             d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'list'>"
+            d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'float'>"
+            d[k] = pyconvert(Float32, v)
+        elseif string(pytype(v)) == "<class 'int'>"
+            d[k] = pyconvert(Int32, v)
+        elseif string(pytype(v)) == "<class 'str'>"
+            d[k] = pyconvert(String, v)
+        elseif string(pytype(v)) == "<class 'NULL'>"
+            d[k] = nothing
         else
-            d[k] = v
+            @warn "Unknown type $k=>$(pytype(v)), converting to string"
+            d[k] = "$v"
         end
     end
     return d
 end
-function pytree2dict(d::Py)
+function pytree2dict(d::Py; kwargs...)
     d = Dict{Any, Any}(PyDict(d))
-    return pytree2dict(d)
+    return pytree2dict(d; kwargs...)
+end
+function defaults(model_class::Py; kwargs...)
+    name = model_class.__name__
+    m = model_class()
+    d = Dict{Any, Any}(PyDict(m.to_dict()))
+    d = d[name]
+    pytree2dict(d; kwargs...)
 end

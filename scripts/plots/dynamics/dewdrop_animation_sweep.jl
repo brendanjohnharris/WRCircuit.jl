@@ -16,7 +16,7 @@ begin # * Model parameters
     dx = 0.5
     rho = 20000.0
     kernel = Dewdrop.distances.GaussianKernel
-    J_e = 0.0008
+    J_ee = 0.0008
     # delta = 3.5
     nu = 7.0
     n_ext = 100
@@ -32,7 +32,7 @@ begin # * Model parameters
     K_ei = round(Int, 200 * k)
     K_ii = round(Int, 250 * k)
 
-    fixed_params = (; dx, rho, kernel, J_e, nu, n_ext,
+    fixed_params = (; dx, rho, kernel, J_ee, nu, n_ext,
                     sigma_ee, sigma_ei, sigma_ie, sigma_ii,
                     K_ee, K_ie, K_ei, K_ii)
 end
@@ -91,7 +91,7 @@ begin # * Convert to a list of (x, y) points for each time t
     tbin = 1u"ms"
     tbins = range(first(times(spikes)), last(times(spikes)), step = tbin) |> intervals
     spiketimes = groupby(spikes, 𝑡 => Bins(tbins))
-    spiketimes = progressmap(spiketimes) do x
+    spiketimes = map(spiketimes) do x
         dropdims(any(x, dims = 𝑡), dims = 𝑡)
     end
     spiketimes = permutedims(stack(spiketimes), (4, 1, 2, 3))
@@ -139,11 +139,11 @@ begin # * Animate
     pbar = ProgressBar()
     job = addjob!(pbar; N = length(ts))
     with(pbar) do
-        record(f, "dewdrop_sweep_all.mp4", ts, framerate = 24) do t
+        record(f, "dewdrop_sweep_all_new.mp4", ts, framerate = 24) do t
             for (i, delta) in enumerate(deltas)
                 idxs[i][] = spikeidxs[t, i]
             end
-            update!(job)
+            Term.update!(job)
         end
     end
     f

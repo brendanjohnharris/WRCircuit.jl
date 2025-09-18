@@ -8,6 +8,10 @@ export bprun, bpsolve, bpsweep, Neuron, Population
 DimensionalData.@dim Neuron ToolsDim
 DimensionalData.@dim Population ToolsDim
 
+function python_reshape(A, ds...)
+    return PermutedDimsArray(reshape(A, ds), reverse(1:length(ds)))
+end
+
 function bprun(net::Py, time; monitors = ("E.spike", "I.spike", "E.V", "I.V"), jit = true,
                kwargs...)
     runner = brainpy.DSRunner(net; monitors, jit, kwargs...)
@@ -65,8 +69,8 @@ function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
     return bpformat(runner; populations, vars, transient)
 end
 
-function bpformat(res, param::Symbol, vals; dt, transient, monitors)
-    # ? res has first dim == 'monitors'. Each element has shape (delta, ts, neurons)
+function bpformat(res, param::Symbol, vals; dt = brainpy.share["dt"], transient, monitors)
+    # ? res has first dim == 'monitors'. Each element has shape (param, ts, neurons)
     populations, vars = monitors2popvars(monitors)
     nt = res[0][0].shape[0] |> convert2(Int)
     t = range(start = dt, step = dt, length = nt) .* u"ms"
@@ -85,48 +89,129 @@ function bpformat(res, param::Symbol, vals; dt, transient, monitors)
     X = reshape(X, length(populations), length(vars))
     return ToolsArray(X, (Population(populations), Var(vars))) |> stack
 end
-function _bpsweep(model, param::Val{:delta}, vals;
-                  duration,
-                  transient,
-                  populations = [:E, :I],
-                  vars = [:V],
-                  num_parallel = 10)
-    monitors = popvars2monitors(populations, vars)
-    duration = uconvert(u"ms", duration) |> ustrip
-    dt = brainpy.share["dt"] |> convert2(Float64)
-    res = model.sweep_deltas(jax.numpy.array(vals);
-                             duration,
-                             monitors,
-                             num_parallel)
-    param = typeof(param).parameters |> only
-    X = bpformat(res, param, vals; dt, transient, monitors)
-    return X
-end
-function bpsweep(model, param::Symbol, vals; kwargs...)
-    _bpsweep(model, Val(param), vals; kwargs...)
-end
-function bpsweep(model, param::Pair; kwargs...)
-    _bpsweep(model, Val(first(param)), last(param); kwargs...)
-end
 
-function bpsweep(model_class, conn::Py, params::Dict, param::Pair; batch_size,
-                 batch_seed = 42,
-                 kwargs...)
-    vals = last(param)
-    param = first(param)
-    # * Subset the vals into batches of size batch
-    batch_vals = Iterators.partition(vals, batch_size)
-    X = map(batch_vals) do bvals
-        clear_live_arrays()
-        model = model_class(; params..., copy_conn = conn,
-                            key = jax.random.PRNGKey(batch_seed)) # Fast construction
-        _bpsweep(model, Val(param), bvals; kwargs...)
+"""
+Format an arbitrary batch computation, e.g. monitor output of stats_run
+"""
+function bpformat(batch_res, sweep_parameters; transient, tmax,
+                  dt = pyconvert(Float32, brainpy.share["dt"]) * u"ms")
+    sweep_parameters = convert2(Dict{String, Any})(sweep_parameters)
+    monitors = batch_res.keys() |> convert2(Vector{String})
+    if haskey(sweep_parameters, "key")
+        sweep_parameters = delete!(sweep_parameters, "key")
     end
-    pcat(x, y) = cat(x, y, dims = param)
-    return reduce(pcat, X)
+    vs = values(sweep_parameters)
+    vs = map(vs) do v
+        if ndims(v) == 2
+            return eachrow(v)
+        else
+            return v
+        end
+    end
+    sweep_parameters = map((vs...,) -> NamedTuple(Symbol.(keys(sweep_parameters)) .=> vs),
+                           vs...)
+    res = map(monitors) do m
+        population, var = split(m, ".")
+        res = batch_res[m] |> PyArray
+        ts = range(transient, tmax, step = dt)[1:size(res, 2)]
+        neurons = Symbol.(population .* string.(1:size(res, 3)))
+        return ToolsArray(res, (Obs(sweep_parameters), 𝑡(ts), Neuron(neurons)))
+    end
+    res = map(sweep_parameters) do p
+        out = map(res) do r
+            r[Obs = At(p)]
+        end
+        Dict(monitors .=> out)
+    end
+    res = Dict(sweep_parameters .=> res)
 end
 
-""" Only for jittable funcs. Each value fo params should be an interator of the same length"""
-function bpsweep(func, params::Dict; batch_size = 5, clear_buffer, kwargs...)
-    return stats.sweep_progress(func, params; batch_size, clear_buffer, kwargs...)
+# function _bpsweep(model, param::Val{:delta}, vals;
+#                   duration,
+#                   transient,
+#                   populations = [:E, :I],
+#                   vars = [:V],
+#                   num_parallel = 10)
+#     monitors = popvars2monitors(populations, vars)
+#     duration = uconvert(u"ms", duration) |> ustrip
+#     dt = brainpy.share["dt"] |> convert2(Float64)
+#     res = model.sweep_deltas(jax.numpy.array(vals);
+#                              duration,
+#                              monitors,
+#                              num_parallel)
+#     param = typeof(param).parameters |> only
+#     X = bpformat(res, param, vals; dt, transient, monitors)
+#     return X
+# end
+# function bpsweep(model, param::Symbol, vals; kwargs...)
+#     _bpsweep(model, Val(param), vals; kwargs...)
+# end
+# function bpsweep(model, param::Pair; kwargs...)
+#     _bpsweep(model, Val(first(param)), last(param); kwargs...)
+# end
+
+# function bpsweep(model_class, conn::Py, params::Dict, param::Pair; batch_size,
+#                  batch_seed = 42,
+#                  kwargs...)
+#     vals = last(param)
+#     param = first(param)
+#     # * Subset the vals into batches of size batch
+#     batch_vals = Iterators.partition(vals, batch_size)
+#     X = map(batch_vals) do bvals
+#         clear_live_arrays()
+#         model = model_class(; params..., copy_conn = conn,
+#                             key = jax.random.PRNGKey(batch_seed)) # Fast construction
+#         _bpsweep(model, Val(param), bvals; kwargs...)
+#     end
+#     pcat(x, y) = cat(x, y, dims = param)
+#     return reduce(pcat, X)
+# end
+
+# """ Only for jittable funcs. Each value fo params should be an interator of the same length"""
+# function bpsweep(func, params::Dict; batch_size = 5, clear_buffer, kwargs...)
+#     return stats.sweep_progress(func, params; batch_size, clear_buffer, kwargs...)
+# end
+
+function PRNGKey(seed::Integer)
+    jax.random.PRNGKey(seed)
+end
+
+function create_run(model;
+                    params = (),
+                    monitors,
+                    tmax,
+                    transient = 0.0,
+                    concrete_out = false)
+    tmax = ustrip(to_ms(tmax))
+    transient = ustrip(to_ms(transient))
+    return stats.create_run(model, pydict(params), monitors, tmax, transient, concrete_out)
+end
+
+function create_stats_run(run, stat_funcs)
+    return stats.create_stats_run(run, pydict(stat_funcs))
+end
+
+function string_keys(d::Dict{Symbol, T}) where {T}
+    return Dict(string(k) => v for (k, v) in d)
+end
+function string_keys(d::Py)
+    return d
+end
+function string_keys(d::Dict{String, T}) where {T}
+    return d
+end
+function partial_vmap(func; batch_size = nothing)
+    function _map(x; batch_size = batch_size)
+        if isnothing(batch_size)
+            batch_size = maximum(length.(values(x)))
+        end
+        d = pydict(string_keys(x))
+        stats.partial_vmap(func; batch_size)(d)
+    end
+end
+
+function model_parameters(m::Py; params...)
+    ps = m.to_dict(m) |> convert2(Dict{String, Any})
+    ps = (; ps..., params...)
+    return ps
 end
