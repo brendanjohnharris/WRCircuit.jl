@@ -22,6 +22,8 @@ function _preamble()
         using MeanSquaredDisplacement
         using Distributions
         using StableDistributions
+        using JLD2
+        using Random
     end
 end
 macro preamble()

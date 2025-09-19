@@ -6,6 +6,7 @@
 *.jld2
 *.mat
 *.mp4
+*.png
 *.parquet
 .CondaPkg/
 .CondaPkg copy/

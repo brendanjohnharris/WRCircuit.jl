@@ -9,6 +9,7 @@ using Dewdrop
 using JLD2
 using LinearAlgebra
 using Random
+using SparseArrays
 Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
@@ -21,8 +22,8 @@ begin # * Fixed parameters
     model = Dewdrop.models.Spatial
     default_params = Dewdrop.defaults(model)
 
-    tmax = 20u"s" # * Bump up
-    transient = 10u"s" # The transient. Simulations always begin at 0
+    tmax = 30u"s"
+    transient = 5u"s" # The transient. Simulations always begin at 0
     dx = 0.5
     rho = 20000.0
     key = 42
@@ -81,15 +82,15 @@ begin # * The idea is to randomly sample some parameters from discretized parame
     # * Start by defining parameter ranges to sample from
     parameter_grid = [
         Dim{:delta}(range(1, 9, length = 16)),
+        Dim{:K_ee}(round.(Int, range(100, 400, length = 16))),
+        Dim{:K_ei}(round.(Int, range(200, 500, length = 16))),
+        Dim{:K_ie}(round.(Int, range(100, 300, length = 16))),
+        Dim{:K_ii}(round.(Int, range(100, 300, length = 16)))
         # Dim{:nu}(range(2, 6, length = 16)),
         # Dim{:sigma_ee}(range(0.04, 0.1, length = 8)),
         # Dim{:sigma_ei}(range(0.04, 0.12, length = 8)),
         # Dim{:sigma_ie}(range(0.1, 0.2, length = 8)),
         # Dim{:sigma_ii}(range(0.2, 0.2, length = 8)),
-        Dim{:K_ee}(round.(Int, range(100, 400, length = 16))),
-        Dim{:K_ei}(round.(Int, range(200, 500, length = 16))),
-        Dim{:K_ie}(round.(Int, range(100, 300, length = 16))),
-        Dim{:K_ii}(round.(Int, range(100, 300, length = 16)))
         # Dim{:J_ee}(range(0.0005, 0.0015, length = 16)),
         # Dim{:J_ei}(range(0.0005, 0.002, length = 16)),
         # Dim{:tau_r_e}(range(0.5, 3.0, length = 8)),
@@ -100,21 +101,14 @@ begin # * The idea is to randomly sample some parameters from discretized parame
 
     static_argnames = ("K_ee", "K_ii", "K_ei", "K_ie") # Jit-incompatible parameters (because they change array sizes)
 
-    parameter_grid = map(parameter_grid) do d
-        if eltype(d) <: AbstractFloat
-            d = round.(d, sigdigits = 3)
-        end
-        return d
-    end
-
     parameter_grid = Iterators.product(parameter_grid...) |> collect
     parameter_grid = map(parameter_grid) do ps
         NamedTuple(name.(dims(parameter_grid)) .=> ps)
     end
 
     hash_grid = map(parameter_grid) do p
-        merged_params = (; default_params[:parameters]..., p, key = [0, key])
-        Base.hash(merged_params)
+        merged_params = (; default_params[:parameters]..., p..., key = [0, key])
+        Base.hash(merged_params |> Dewdrop.sortparams) # Order matters for named tuples
     end
 
     tagsave(joinpath(path, "parameter_grid.jld2"),
@@ -124,7 +118,9 @@ end
 
 while true
     begin # * Load computed grid
-        computed_hashes = splitext.(readdir(path)) .|> first .|> Meta.parse
+        computed_hashes = splitext.(readdir(path)) .|> first
+        computed_hashes = filter(x -> all(isdigit, x), computed_hashes)
+        computed_hashes = map(Base.Fix1(parse, UInt), computed_hashes)
         Q = map(hash_grid) do h
             h in computed_hashes
         end
@@ -140,7 +136,8 @@ while true
         end
         static_options = zip(static_options...) |> collect
         static_choice = static_options[rand(1:length(static_options))]
-        idxs = findall(static_options .== [static_choice])[1:batch_size]
+        idxs = shuffle(findall(static_options .== [static_choice]))
+        idxs = idxs[1:min(batch_size, length(idxs))]
         these_ps = these_ps[idxs]
     end
     begin # And format parameters
@@ -154,25 +151,25 @@ while true
     end
 
     begin # * And run the batch simulation
-        begin # * Create sweep function
-            run = Dewdrop.create_run(model; monitors, tmax, transient)
-            stats_run = Dewdrop.create_stats_run(run, stat_funcs)
-        end
-        begin # * Run simulation
-            stats, sweep_parameters = Dewdrop.partial_vmap(stats_run; static_argnames)(these_ps)
-        end
+        run = Dewdrop.create_run(model; monitors, tmax, transient)
+        stats_run = Dewdrop.create_stats_run(run, stat_funcs)
+        stats, sweep_parameters = Dewdrop.partial_vmap(stats_run; static_argnames)(these_ps)
     end
+
     begin # * Format the monitors
         res = Dewdrop.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
     end
 
     begin # * Save each result, combining swept params with default model values
-        map(collect(res)) do (params, r)
+        map((collect ∘ keys ∘ last ∘ first)(res)) do params
             merged_params = (; default_params[:parameters]..., params..., key = [0, key])
-            hsh = Base.hash(merged_params)
+            hsh = Base.hash(Dewdrop.sortparams(merged_params))
             @assert hsh ∈ hash_grid
             filename = hsh
-            out = Dict("parameters" => merged_params, "stats" => r)
+            r = map(collect(res)) do (k, v)
+                k => v[params]
+            end |> Dict
+            out = Dict("parameters" => merged_params, r...)
             tagsave(joinpath(path, "$filename.jld2"), out)
             return merged_params
         end

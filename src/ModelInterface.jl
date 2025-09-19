@@ -117,7 +117,15 @@ function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata)
         res = batch_res[m] |> PyArray
         ts = range(transient, tmax, step = dt)[1:size(res, 2)]
         neurons = Symbol.(population .* string.(1:size(res, 3)))
-        return ToolsArray(res, (Obs(sweep_parameters), 𝑡(ts), Neuron(neurons)))
+        res = ToolsArray(res, (Obs(sweep_parameters), 𝑡(ts), Neuron(neurons)))
+        res = map(eachslice(res, dims = Obs)) do r
+            r = permutedims(r, (𝑡, Neuron))
+            if r isa SpikeTrain
+                r = set(r, sparse(r))
+            end
+            return r
+        end
+        return res
     end
     res = map(sweep_parameters) do p
         out = map(res) do r
@@ -128,7 +136,7 @@ function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata)
     res = Dict(sweep_parameters .=> res)
 end
 
-function batchformat(batch_res, sweep_parameters, stat::Val{:mua}; metadata)
+function batchformat(batch_res, sweep_parameters, ::Val{:mua}; metadata)
     transient = metadata[:transient]
     tmax = metadata[:tmax]
     dt = metadata[:mua_dt]
@@ -171,6 +179,8 @@ function batchformat(stats, sweep_parameters; metadata)
                                    metadata)
     end |> Dict
 end
+
+@generated sortparams(nt::NamedTuple{KS}) where {KS} = :(NamedTuple{$(Tuple(sort(collect(KS))))}(nt))
 
 # function _bpsweep(model, param::Val{:delta}, vals;
 #                   duration,
