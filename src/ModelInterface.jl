@@ -93,10 +93,12 @@ end
 """
 Format an arbitrary batch computation, e.g. monitor output of stats_run
 """
-function bpformat(batch_res, sweep_parameters; transient, tmax,
-                  dt = pyconvert(Float32, brainpy.share["dt"]) * u"ms")
-    sweep_parameters = convert2(Dict{String, Any})(sweep_parameters)
-    monitors = batch_res.keys() |> convert2(Vector{String})
+function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata)
+    transient = metadata[:transient]
+    tmax = metadata[:tmax]
+    dt = metadata[:dt]
+    monitors = keys(batch_res) |> collect#.keys() |> convert2(Vector{String})
+    sweep_parameters = deepcopy(sweep_parameters)
     if haskey(sweep_parameters, "key")
         sweep_parameters = delete!(sweep_parameters, "key")
     end
@@ -124,6 +126,50 @@ function bpformat(batch_res, sweep_parameters; transient, tmax,
         Dict(monitors .=> out)
     end
     res = Dict(sweep_parameters .=> res)
+end
+
+function batchformat(batch_res, sweep_parameters, stat::Val{:mua}; metadata)
+    transient = metadata[:transient]
+    tmax = metadata[:tmax]
+    dt = metadata[:mua_dt]
+    monitors = keys(batch_res) |> collect#.keys() |> convert2(Vector{String})
+    sweep_parameters = deepcopy(sweep_parameters)
+    if haskey(sweep_parameters, "key")
+        sweep_parameters = delete!(sweep_parameters, "key")
+    end
+    vs = values(sweep_parameters)
+    vs = map(vs) do v
+        if ndims(v) == 2
+            return eachrow(v)
+        else
+            return v
+        end
+    end
+    sweep_parameters = map((vs...,) -> NamedTuple(Symbol.(keys(sweep_parameters)) .=> vs),
+                           vs...)
+    res = map(monitors) do m
+        res = batch_res[m] |> PyArray
+        ts = range(transient, tmax, step = dt)[1:size(res, 2)]
+        return ToolsArray(res, (Obs(sweep_parameters), 𝑡(ts)))
+    end
+    res = map(sweep_parameters) do p
+        out = map(res) do r
+            r[Obs = At(p)]
+        end
+        Dict(monitors .=> out)
+    end
+    res = Dict(sweep_parameters .=> res)
+end
+function batchformat(r, sweep_parameters, param::Symbol; kwargs...)
+    batchformat(r, sweep_parameters, Val(param); kwargs...)
+end
+function batchformat(stats, sweep_parameters; metadata)
+    stats = pyconvert(Dict, stats)
+    sweep_parameters = pyconvert(Dict, sweep_parameters)
+    map(collect(stats)) do (stat, res)
+        return stat => batchformat(pyconvert(Dict, res), sweep_parameters, Symbol(stat);
+                                   metadata)
+    end |> Dict
 end
 
 # function _bpsweep(model, param::Val{:delta}, vals;
@@ -200,13 +246,13 @@ end
 function string_keys(d::Dict{String, T}) where {T}
     return d
 end
-function partial_vmap(func; batch_size = nothing)
+function partial_vmap(func; batch_size = nothing, kwargs...)
     function _map(x; batch_size = batch_size)
         if isnothing(batch_size)
             batch_size = maximum(length.(values(x)))
         end
         d = pydict(string_keys(x))
-        stats.partial_vmap(func; batch_size)(d)
+        stats.partial_vmap(func; batch_size, kwargs...)(d)
     end
 end
 

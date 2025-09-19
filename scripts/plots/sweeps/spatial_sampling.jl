@@ -21,7 +21,7 @@ begin # * Fixed parameters
     model = Dewdrop.models.Spatial
     default_params = Dewdrop.defaults(model)
 
-    tmax = 50u"s" # * Bump up
+    tmax = 20u"s" # * Bump up
     transient = 10u"s" # The transient. Simulations always begin at 0
     dx = 0.5
     rho = 20000.0
@@ -71,10 +71,10 @@ begin # * Fixed parameters
                       #   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
                       #   "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
                       #   "temporal_average" => Dewdrop.stats.temporal_average,
-                      #   "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))),
+                      "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))),
                       "monitor" => Dewdrop.stats.monitor)
-
-    metadata = (; positions, bin_indices, mua_dt, tmax, transient, monitors)
+    dt = pyconvert(Float32, Dewdrop.brainpy.share["dt"]) * u"ms"
+    metadata = (; positions, bin_indices, mua_dt, tmax, transient, monitors, dt)
 end
 
 begin # * The idea is to randomly sample some parameters from discretized parameter distributions. This script can be left running to populate the model cache.
@@ -98,6 +98,8 @@ begin # * The idea is to randomly sample some parameters from discretized parame
         # Dim{:tau_d_i}(range(2.0, 8.0, length = 8))
     ]
 
+    static_argnames = ("K_ee", "K_ii", "K_ei", "K_ie") # Jit-incompatible parameters (because they change array sizes)
+
     parameter_grid = map(parameter_grid) do d
         if eltype(d) <: AbstractFloat
             d = round.(d, sigdigits = 3)
@@ -112,7 +114,7 @@ begin # * The idea is to randomly sample some parameters from discretized parame
 
     hash_grid = map(parameter_grid) do p
         merged_params = (; default_params[:parameters]..., p, key = [0, key])
-        hash(params)
+        Base.hash(merged_params)
     end
 
     tagsave(joinpath(path, "parameter_grid.jld2"),
@@ -131,8 +133,15 @@ while true
         @info "All parameter combinations computed, exiting"
         break
     end
-    begin # * Then, randomly select batches of un-computed parameter combinations
-        these_ps = shuffle(parameter_grid[.!Q])[1:min(batch_size, count(!, Q))]
+    begin # * Then, randomly select batches of un-computed parameter combinations. Start by picking ONE value for the static args, then batch_size from the non-static args
+        these_ps = parameter_grid[.!Q]
+        static_options = map(static_argnames) do n
+            getindex.(these_ps, Symbol(n))
+        end
+        static_options = zip(static_options...) |> collect
+        static_choice = static_options[rand(1:length(static_options))]
+        idxs = findall(static_options .== [static_choice])[1:batch_size]
+        these_ps = these_ps[idxs]
     end
     begin # And format parameters
         jax_keys = Dewdrop.jax.numpy.stack([Dewdrop.PRNGKey(key) for _ in 1:batch_size]) # Important, must be python array
@@ -150,18 +159,20 @@ while true
             stats_run = Dewdrop.create_stats_run(run, stat_funcs)
         end
         begin # * Run simulation
-            stats, sweep_parameters = Dewdrop.partial_vmap(stats_run)(these_ps)
+            stats, sweep_parameters = Dewdrop.partial_vmap(stats_run; static_argnames)(these_ps)
         end
     end
     begin # * Format the monitors
-        res = Dewdrop.bpformat(stats["monitor"], sweep_parameters; transient, tmax)
+        res = Dewdrop.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
     end
 
     begin # * Save each result, combining swept params with default model values
         map(collect(res)) do (params, r)
             merged_params = (; default_params[:parameters]..., params..., key = [0, key])
-            filename = hash(merged_params)
-            out = Dict("parameters" => merged_params, r...)
+            hsh = Base.hash(merged_params)
+            @assert hsh ∈ hash_grid
+            filename = hsh
+            out = Dict("parameters" => merged_params, "stats" => r)
             tagsave(joinpath(path, "$filename.jld2"), out)
             return merged_params
         end

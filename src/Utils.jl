@@ -278,3 +278,15 @@ function defaults(model_class::Py; kwargs...)
     d = d[name]
     pytree2dict(d; kwargs...)
 end
+
+function group_dt(x::T, dt) where {T}
+    round(x / dt) * dt
+end
+function compute_rates(spikes::SpikeTrain, dt)
+    rates = groupby(spikes, 𝑡 => Base.Fix2(group_dt, dt))
+    rates = map(rates) do r
+        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
+    end |> stack
+    rates = permutedims(rates, (𝑡, Neuron))
+    rates = rectify(rates, dims = 𝑡)
+end

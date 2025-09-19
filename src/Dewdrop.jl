@@ -97,5 +97,6 @@ end
 
 include("ModelInterface.jl")
 include("Utils.jl")
+include("Plots.jl")
 
 end # module

@@ -20,15 +20,15 @@ begin
         sigma_ei = 0.095
         sigma_ie = 0.19
         sigma_ii = 0.19
-        gamma = 4
-        K_ee = 270 # 270
-        K_ei = 350
-        K_ie = 165
-        K_ii = 200
+        k = 300 / 270
+        K_ee = 390 # 270
+        K_ei = round(Int, k * 420)
+        K_ie = round(Int, k * 180)
+        K_ii = round(Int, k * 200)
         delta = 3.0
-        nu = 5.0
+        nu = 3.65
         n_ext = 100
-        J_ee = 0.0010 # 0.00105
+        J_ee = 0.001 # 0.00105
         J_ei = 0.00145
         tau_r_i = 2.0
         tau_d_i = 5.0
@@ -44,7 +44,6 @@ begin
                     sigma_ei,
                     sigma_ie,
                     sigma_ii,
-                    gamma,
                     K_ee,
                     K_ei,
                     K_ie,
@@ -64,62 +63,64 @@ end
 
 begin # * Run simulation
     m = model(; fixed_params...)
-    x = bpsolve(m, tmax; populations = [:E, :I], vars = [:spike, :V, :input],
+    x = bpsolve(m, tmax; populations = [:E, :I], vars = [:spike, :V],
                 transient = tmin)
 end
 
 begin # * Animate
     spikes = x[Population = At(:E), Var = At(:spike)]
-    dt = 50.0u"ms"
-    function group_dt(x::T, dt::T) where {T}
-        round(x / dt) * dt
-    end
-    rates = groupby(spikes, 𝑡 => Base.Fix2(group_dt, dt))
-    rates = map(rates) do r
-        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
-    end |> stack
-    rates = permutedims(rates, (𝑡, Neuron))
-    rates = rectify(rates, dims = 𝑡)
-
-    function infer_geometry(A, dx)
-        ns = lookup(A, Neuron)
-        n = sqrt(length(ns)) |> Int
-        ns = Dewdrop.python_reshape(ns, n, n)
-        δx = dx / n
-        x = range(δx / 2, dx, step = δx)
-        idxs = ToolsArray(Matrix{eltype(ns)}(undef, n, n),
-                          (DimensionalData.X(x), DimensionalData.Y(x)))
-        idxs .= ns # Assume Neurons are just flattened
-        positions = Iterators.product(x, x)
-        positions = ToolsArray(collect(positions)[:], dims(A, Neuron))
-        return positions, idxs
-    end
-
-    positions, idxs = infer_geometry(spikes, dx)
+    rates = Dewdrop.compute_rates(spikes, 50u"ms")
+    Dewdrop.animate_rates(rates, dx; filename = "critical_demo.mp4")
 end
 
-begin # * Animate
-    color = Observable(zeros(length(positions)))
-    colormap = cgrad([:transparent, :crimson])
-
-    f = Figure()
-    ax = Axis(f[1, 1])
-    p = scatter!(ax, Point2f.(positions); markersize = 5, color, colormap,
-                 colorrange = (0, ustrip(maximum(rates))))
-    Colorbar(f[1, 2], p; label = "Firing rate (Hz)")
-    record(f, "critical_demo.mp4", lookup(rates, 𝑡), framerate = 12) do t
-        r = rates[𝑡 = At(t)] |> ustrip
-        color[] = r
-    end
-end
-
-begin # * Power spectrum of rate fluctuations
+begin # * Membrane potential
     V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
     V = set(V, 𝑡 => uconvert.(u"s", times(V)))
     V = rectify(V, dims = 𝑡)
-    lines(V[:, 1]) |> display
+    lines(V[1:2000, 970]) |> display
+end
+begin # * Unit spectrum
     s = spectrum(V)
     s = mean(s, dims = Neuron)
-    s = dropdims(s, dims = Neuron)[5:end]
-    lines(s |> ustripall; axis = (; xscale = log10, yscale = log10))
+    s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 200]
+    lines(s; axis = (; xscale = log10, yscale = log10)) |> display
+end
+begin # * MUA spectrum
+    mdt = 3.0u"ms"
+    mua = groupby(spikes, 𝑡 => Base.Fix2(group_dt, mdt))
+    mua = map(mua) do r
+        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
+    end |> stack
+    mua = permutedims(mua, (𝑡, Neuron))
+    mua = rectify(mua, dims = 𝑡)
+    N = lookup(mua, Neuron) |> length |> sqrt |> Int
+    ts = dims(mua, 𝑡)
+    mua = reshape(mua, (size(mua, 1), N, N))
+    idxs = [i:(i + 9) for i in 1:10:(N - 10 + 1)]
+    idxs = Iterators.product(idxs, idxs)
+    muas = map(idxs) do (i, j)
+        m = mua[:, i, j] # * Get local patch
+        m = mean(m, dims = (2, 3))
+        m = ToolsArray(vec(m), ts)
+        m = set(m, 𝑡 => uconvert.(u"s", times(m)))
+        m = rectify(m, dims = 𝑡)
+        return spectrum(m)
+    end
+    muas = mean(muas)
+    lines(ustripall(muas)[𝑓 = 1 .. 200]; axis = (; xscale = log10, yscale = log10)) |>
+    display
+end
+begin # * Plot inter-spike interval distribution
+    spiketimes = map(eachslice(spikes, dims = Neuron)) do s
+        sts = times(s)[findall(s)]
+    end
+    isis = map(spiketimes) do sts
+        diff(sts)
+    end
+    f = Figure()
+    ax = Axis(f[1, 1]; xlabel = "Inter-spike interval (ms)",
+              ylabel = "Density", limits = ((0, 100), nothing))
+    hist!(ax, Iterators.flatten(isis) |> collect |> ustrip, normalization = :pdf,
+          bins = range(0.0, 1000, step = 5))
+    display(f)
 end
