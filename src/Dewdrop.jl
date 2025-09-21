@@ -37,7 +37,7 @@ function __init__()
     end
 
     pycopy!(sys, pyimport("sys"))
-    sys.path.append(pwd())
+    sys.path.insert(0, dirname(@__DIR__))
 
     pycopy!(os, pyimport("os"))
     # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false" # For clusters/multiprocessing

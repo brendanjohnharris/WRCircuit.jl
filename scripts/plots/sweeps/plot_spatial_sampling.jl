@@ -32,25 +32,26 @@ begin # * Check file quality
 end
 begin # * Loop through files and plot
     @info "Processing $(sum(Q)) files"
-    Q = map(Chart(ProgressLogger()), hash_grid[Q]) do hash
+    Q = map(Chart(ProgressLogger(100)), hash_grid[Q]) do hash
         file = string(hash) * ".jld2"
 
-        if isfile(datadir("spatial_sampling", file))
-            parameters = load(datadir("spatial_sampling", file), "parameters")
-            title = parameters[[:delta, :K_ee, :K_ei, :K_ie, :K_ii]]
-            title = map(keys(title), values(title)) do k, v
-                        k => round(v, sigdigits = 3)
-                    end |> NamedTuple |> Dewdrop.sortparams |> string
+        parameters = load(datadir("spatial_sampling", file), "parameters")
+        title = parameters[[:delta, :K_ee, :K_ei, :K_ie, :K_ii]]
+        title = map(keys(title), values(title)) do k, v
+                    k => round(v, sigdigits = 3)
+                end |> NamedTuple |> Dewdrop.sortparams |> string
 
+        spikes = load(datadir("spatial_sampling", file), "monitor")["E.spike"]
+
+        if isfile(datadir("spatial_sampling", file))
             animation_file = plotdir("spatial_sampling", "animation", "$hash.mp4")
             if isfile(animation_file)
                 @info "Animation for $hash already exists"
             else
-                spikes = load(datadir("spatial_sampling", file), "monitor")["E.spike"]
                 rates = Dewdrop.compute_rates(spikes, 50u"ms")
                 Dewdrop.animate_rates(rates, dx;
                                       filename = animation_file,
-                                      axis = (; title, titlesize = 10))
+                                      axis = (; title, titlesize = 12))
             end
 
             # * Now do MUA spectrum
@@ -59,8 +60,28 @@ begin # * Loop through files and plot
                 @info "MUA spectrum for $hash already exists"
             else
                 mua = load(datadir("spatial_sampling", file), "mua")["E.spike"]
+                mua = mua .- mean(mua)
                 s = spectrum(mua, 0.5u"Hz")
-                f = plotspectrum(s)
+                limits = ((1, 250), (extrema(s) .|> ustrip))
+                f = Figure()
+                ax = Axis(f[1, 1]; title = title, titlesize = 12, xscale = log10,
+                          yscale = log10, limits)
+                plotspectrum!(ax, s)
+
+                # * Inset firing rate distributions
+                rates = mean(spikes, dims = 𝑡) ./ step(spikes)
+                axx = Axis(f[1, 1];
+                           width = Relative(0.3),
+                           height = Relative(0.3),
+                           halign = 0.05,
+                           valign = 0.05,
+                           xticklabelsize = 12,
+                           xgridvisible = false,
+                           ygridvisible = false,
+                           backgroundcolor = :white,
+                           xaxisposition = :top)
+                hideydecorations!(axx)
+                hist!(axx, rates[:] |> ustrip, normalization = :pdf)
                 wsave(mua_file, f)
             end
 
