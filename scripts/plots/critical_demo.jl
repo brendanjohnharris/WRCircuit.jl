@@ -20,10 +20,10 @@ begin
         # sigma_ei = 0.095
         # sigma_ie = 0.17
         # sigma_ii = 0.17
-        sigma_ee = 0.05  # from decay=7.5
-        sigma_ei = 0.06  # from decay=9.5
-        sigma_ie = 0.12  # from decay=19
-        sigma_ii = 0.12  # from decay=19
+        sigma_ee = 0.06  # from decay=7.5
+        sigma_ei = 0.07  # from decay=9.5
+        sigma_ie = 0.14  # from decay=19
+        sigma_ii = 0.14  # from decay=19
         # K_ee = 140
         # K_ei = 160
         # K_ie = 100
@@ -34,15 +34,10 @@ begin
         # K_ii = 190
         K_ee = 260
         K_ei = 340
-        K_ie = 230
+        K_ie = 225
         K_ii = 290
         nu = 10.0
         n_ext = 100
-        tau_d_e = 5.0   # Increased from 5.0
-        tau_d_i = 4.5  # Increased from 4.5
-        tau_r_i = 2.0   # Increased from 1.0
-        tau_K = 40.0
-        Delta_g_K = 0.003
     end
 end
 
@@ -64,8 +59,7 @@ begin
                     tau_d_i,
                     tau_d_e,
                     tau_r_i,
-                    tau_K,
-                    Delta_g_K)
+                    tau_r_e)
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
     # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
