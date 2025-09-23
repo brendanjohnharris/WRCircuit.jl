@@ -228,20 +228,22 @@ class Nonspatial(bp.Network):
 
     def __init__(
         self,
-        N_e=4000,  # Number of Exc. neurons
-        K_ee=72,  # Total 'mass' of connectivity probability (proportional to num. synapses)
-        K_ei=88,
-        K_ie=28,
-        K_ii=39,
+        N_e=1000,  # Number of Exc. neurons
+        K_ee=60,
+        K_ei=60,
+        K_ie=60,
+        K_ii=80,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
         nu=7.0,  # External population firing rate
         n_ext=100,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,  # ! Has same units as g_L: uS
+        J_ee=0.00105,  # ! Has same units as g_L: uS
+        J_ei=0.00145,
         tau_r_e=1.0,
         tau_r_i=1.0,
         tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i=4.5,  # 3.0 for yifan, # 4.5 for shencong
+        tau_d_i=4.0,  # 3.0 for yifan, # 4.5 for shencong
+        Delta_g_K=0.002,  # Adaptation strength for excitatory neurons
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
         copy_conn=False,  # Whether to copy connectivity from the provided network
@@ -251,8 +253,8 @@ class Nonspatial(bp.Network):
         self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
-        self.J_e = J_e
-        self.J_i = self.J_e * delta
+        self.J_ee = J_ee
+        self.J_ei = J_ei
         self.method = method
         self.key = key
 
@@ -275,6 +277,10 @@ class Nonspatial(bp.Network):
         )
         self.tau_d_i = tau_d_i  # 3.0 for yifan, # 4.5 for shencong
 
+        self.J_ie = (J_ee * K_ee) * self.delta / K_ie
+        self.J_ii = (J_ei * K_ei) * self.delta / K_ii
+        self.Delta_g_K = Delta_g_K
+
         self.key, subkey = jax.random.split(self.key)
         exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
 
@@ -293,7 +299,7 @@ class Nonspatial(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.003,  # 0.003 for guazhang, 0.002 for shencong
+            Delta_g_K=Delta_g_K,  # 0.003 for guazhang, 0.002 for shencong
             V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
@@ -423,7 +429,7 @@ class Nonspatial(bp.Network):
             conn=conn_exte,
             delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
+            g_max=self.J_ee,
             tau_r=1.0,
             V_rev=V_rev_e,
         )
@@ -433,7 +439,7 @@ class Nonspatial(bp.Network):
             conn=conn_exti,
             delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
+            g_max=self.J_ei,
             tau_r=1.0,
             V_rev=V_rev_e,
         )
@@ -445,69 +451,77 @@ class Nonspatial(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.delta, self.J_e)
+        self.reinit_weights(self.delta, (self.J_ee, self.J_ei))
 
-    def _reinit_weights(self, delta, J_e):
-        # self.J_i = self.J_e * self.delta
-        # self.key, *subkeys = jax.random.split(self.key, 7)
-        # self.E2E.proj.comm.weight = correlate_weights(
-        #     self.E2E.proj,
-        #     self.J_e,
-        #     self.N_e,
-        #     subkeys[0],  # ? Need to pass N_ee to keep this function jittable.
-        # )
-        # self.E2I.proj.comm.weight = correlate_weights(
-        #     self.E2I.proj, self.J_e, self.N_i, subkeys[1]
-        # )
-        # self.I2E.proj.comm.weight = correlate_weights(
-        #     self.I2E.proj, self.J_i, self.N_e, subkeys[2]
-        # )
-        # self.I2I.proj.comm.weight = correlate_weights(
-        #     self.I2I.proj, self.J_i, self.N_i, subkeys[3]
-        # )
-        # self.ext2E.proj.comm.weight = correlate_weights(
-        #     self.ext2E.proj, self.J_e, self.N_e, subkeys[4]
-        # )
-        # self.ext2I.proj.comm.weight = correlate_weights(
-        #     self.ext2I.proj, self.J_e, self.N_i, subkeys[5]
-        # )
-
-        K_ee = indegrees_static(self.E2E.proj.comm.indices, self.N_e)
-        K_ei = indegrees_static(self.E2I.proj.comm.indices, self.N_i)
-        K_ie = indegrees_static(self.I2E.proj.comm.indices, self.N_e)
-        K_ii = indegrees_static(self.I2I.proj.comm.indices, self.N_i)
-        K_ext_e = indegrees_static(self.ext2E.proj.comm.indices, self.N_e)
-        K_ext_i = indegrees_static(self.ext2I.proj.comm.indices, self.N_i)
-
-        self.J_i = self.J_e * self.delta
-        w_ee = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ee))
-        w_ei = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ei))
-        w_ie = draw_lognormal(self.J_i, self.J_i / 4, jnp.sum(K_ie))
-        w_ii = draw_lognormal(self.J_i, self.J_i / 4, jnp.sum(K_ii))
-        w_ext_e = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ext_e))
-        w_ext_i = draw_lognormal(self.J_e, self.J_e / 4, jnp.sum(K_ext_i))
-
-        w_ee = sorted_block_assignment(w_ee, K_ee)
-        w_ei = sorted_block_assignment(w_ei, K_ei)
-        w_ie = sorted_block_assignment(w_ie, K_ie)
-        w_ii = sorted_block_assignment(w_ii, K_ii)
-        w_ext_e = sorted_block_assignment(w_ext_e, K_ee)
-        w_ext_i = sorted_block_assignment(w_ext_i, K_ei)
-
-        self.E2E.proj.comm.weight = w_ee
-        self.E2I.proj.comm.weight = w_ei
-        self.I2E.proj.comm.weight = w_ie
-        self.I2I.proj.comm.weight = w_ii
-        self.ext2E.proj.comm.weight = w_ext_e
-        self.ext2I.proj.comm.weight = w_ext_i
-
-    def reinit_weights(self, delta=None, J_e=None):
+    def reinit_weights(self, delta, J_e):
         if delta is not None:
             self.delta = delta
         if J_e is not None:
-            self.J_e = J_e
-        self._reinit_weights(delta, J_e)
-        self.reset_state()  ## or bp.reset_state(self)?? Is either needed?
+            self.J_ee = J_e[0]
+            self.J_ei = J_e[1]
+
+        self.J_ie = self.J_ee * self.delta
+        self.J_ii = self.J_ei * self.delta
+
+        self.J_ie = self.J_ee * self.delta
+        self.J_ii = self.J_ei * self.delta
+        self.key, subkey = jax.random.split(self.key)
+        self.E2E.proj.comm.weight = correlate_weights(
+            self.E2E.proj,
+            self.J_ee,
+            self.N_e,
+            subkey,  # ? Need to pass N_ee to keep this function jittable.
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.E2I.proj.comm.weight = correlate_weights(
+            self.E2I.proj, self.J_ei, self.N_i, subkey
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.I2E.proj.comm.weight = correlate_weights(
+            self.I2E.proj, self.J_ie, self.N_e, subkey
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.I2I.proj.comm.weight = correlate_weights(
+            self.I2I.proj, self.J_ii, self.N_i, subkey
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.ext2E.proj.comm.weight = correlate_weights(
+            self.ext2E.proj, self.J_ee, self.N_e, subkey
+        )
+        self.key, subkey = jax.random.split(self.key)
+        self.ext2I.proj.comm.weight = correlate_weights(
+            self.ext2I.proj, self.J_ei, self.N_i, subkey
+        )
+        self.reset_state()  ## or bp.reset_state(self)??
+
+        # # ! Need to fix
+        # K_ee = indegrees_static(self.E2E.proj.comm.indices, self.N_e)
+        # K_ei = indegrees_static(self.E2I.proj.comm.indices, self.N_i)
+        # K_ie = indegrees_static(self.I2E.proj.comm.indices, self.N_e)
+        # K_ii = indegrees_static(self.I2I.proj.comm.indices, self.N_i)
+        # K_ext_e = indegrees_static(self.ext2E.proj.comm.indices, self.N_e)
+        # K_ext_i = indegrees_static(self.ext2I.proj.comm.indices, self.N_i)
+
+        # w_ee = draw_lognormal(self.J_ee, self.J_ee / 4, jnp.sum(K_ee))
+        # w_ei = draw_lognormal(self.J_ei, self.J_ei / 4, jnp.sum(K_ei))
+        # w_ie = draw_lognormal(self.J_ie, self.J_ie / 4, jnp.sum(K_ie))
+        # w_ii = draw_lognormal(self.J_ii, self.J_ii / 4, jnp.sum(K_ii))
+        # w_ext_e = draw_lognormal(self.J_ee, self.J_ee / 4, jnp.sum(K_ext_e))
+        # w_ext_i = draw_lognormal(self.J_ei, self.J_ei / 4, jnp.sum(K_ext_i))
+
+        # w_ee = sorted_block_assignment(w_ee, K_ee)
+        # w_ei = sorted_block_assignment(w_ei, K_ei)
+        # w_ie = sorted_block_assignment(w_ie, K_ie)
+        # w_ii = sorted_block_assignment(w_ii, K_ii)
+        # w_ext_e = sorted_block_assignment(w_ext_e, K_ee)
+        # w_ext_i = sorted_block_assignment(w_ext_i, K_ei)
+
+        # self.E2E.proj.comm.weight = w_ee
+        # self.E2I.proj.comm.weight = w_ei
+        # self.I2E.proj.comm.weight = w_ie
+        # self.I2I.proj.comm.weight = w_ii
+        # self.ext2E.proj.comm.weight = w_ext_e
+        # self.ext2I.proj.comm.weight = w_ext_i
 
     def reinit_nu(self, nu):
         self.nu = nu
@@ -767,3 +781,51 @@ class Nonspatial(bp.Network):
                 run, [deltas], num_parallel=num_parallel, clear_buffer=False
             )
         return res
+
+    def to_dict(
+        self,
+        keys=[
+            "N_e",
+            "gamma",
+            "K_ee",
+            "K_ei",
+            "K_ie",
+            "K_ii",
+            "delta",
+            "nu",
+            "n_ext",
+            "J_ee",
+            "J_ei",
+            "tau_r_e",
+            "tau_r_i",
+            "tau_d_e",
+            "tau_d_i",
+            "V_rev_e",
+            "V_rev_i",
+            "e_delay",
+            "i_delay",
+            "Delta_g_K",
+            "kernel",
+            "method",
+            "key",
+            "copy_conn",
+        ],
+    ):
+        out = {
+            "parameters": {
+                key: maybe_initializer(value)
+                for key, value in self.__dict__.items()
+                if key in keys
+            }
+        }
+        out["populations"] = {
+            "E": self.E.to_dict(),
+            "I": self.I.to_dict(),
+        }
+        out["synapses"] = {
+            "E2E": self.E2E.to_dict(),
+            "E2I": self.E2I.to_dict(),
+            "I2E": self.I2E.to_dict(),
+            "I2I": self.I2I.to_dict(),
+        }
+        return {self.__class__.__name__: out}

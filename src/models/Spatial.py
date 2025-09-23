@@ -56,7 +56,7 @@ class Spatial(bp.Network):
         K_ei=350,
         K_ie=165,
         K_ii=200,
-        delta=3.9,
+        delta=4.0,
         nu=4.5,  # External population firing rate
         n_ext=100,  # Number of external synapses per Exc. neuron
         J_ee=0.00105,  # Mean weight of excitatory synapses to excitatory neurons
@@ -64,11 +64,12 @@ class Spatial(bp.Network):
         tau_r_e=1.0,
         tau_r_i=1.0,
         tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i=4.5,  # 3.0 for yifan, # 4.5 for shencong
+        tau_d_i=4.0,  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e=0.0,  # Reversal potential for excitatory synapses
         V_rev_i=-80.0,  # Makes the inhibitory synapses inhibitory
         e_delay=1.5,  # Synaptic delay. Shencong uses uniform dist. between 0.5 and 2.5
         i_delay=1.5,
+        Delta_g_K=0.002,  # Adaptation strength for excitatory neurons
         kernel=ExponentialKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
@@ -116,6 +117,7 @@ class Spatial(bp.Network):
         self.V_rev_i = V_rev_i
         self.e_delay = e_delay
         self.i_delay = i_delay
+        self.Delta_g_K = Delta_g_K
 
         # geometry
         A = dx**2
@@ -140,7 +142,7 @@ class Spatial(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.001,
+            Delta_g_K=Delta_g_K,
             V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
@@ -253,41 +255,45 @@ class Spatial(bp.Network):
             delay=e_delay,
             conn=conn_ee,
             tau_d=tau_d_e,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(
+                tau_r_e, 0.05 * tau_r_e, subkey
+            ),  # To mimic random conduction delays
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
-        # self.key, subkey = jax.random.split(self.key)
+        self.key, subkey = jax.random.split(self.key)
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
             delay=e_delay,
             conn=conn_ei,
             tau_d=tau_d_e,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2E = Synapse(
             pre=self.I,
             post=self.E,
             delay=i_delay,
             conn=conn_ie,
             tau_d=tau_d_i,
-            tau_r=tau_r_i,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2I = Synapse(
             pre=self.I,
             post=self.I,
             delay=i_delay,
             conn=conn_ii,
             tau_d=tau_d_i,
-            tau_r=tau_r_i,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
@@ -311,7 +317,7 @@ class Spatial(bp.Network):
             delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_ee,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
         self.ext2I = Synapse(
@@ -321,7 +327,7 @@ class Spatial(bp.Network):
             delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_ei,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
 
@@ -340,6 +346,7 @@ class Spatial(bp.Network):
         if J_e is not None:
             self.J_ee = J_e[0]
             self.J_ei = J_e[1]
+
         self.J_ie = self.J_ee * self.delta
         self.J_ii = self.J_ei * self.delta
         self.key, subkey = jax.random.split(self.key)
@@ -628,6 +635,7 @@ class Spatial(bp.Network):
             "V_rev_i",
             "e_delay",
             "i_delay",
+            "Delta_g_K",
             "kernel",
             "method",
             "key",

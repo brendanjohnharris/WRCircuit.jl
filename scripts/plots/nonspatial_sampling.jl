@@ -14,65 +14,17 @@ Dewdrop.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Sampling parameters
-    batch_size = 5
-    path = datadir("spatial_sampling")
+    batch_size = 16
+    path = datadir("nonspatial_sampling")
 end
 
 begin # * Fixed parameters
-    model = Dewdrop.models.Spatial
+    model = Dewdrop.models.Nonspatial
     default_params = Dewdrop.defaults(model)
 
     tmax = 30u"s"
     transient = 5u"s" # The transient. Simulations always begin at 0
-    dx = default_params[:parameters][:dx]
-    rho = default_params[:parameters][:rho]
     key = 42
-
-    # mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
-    # mua_func = Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt)))
-
-    # dn = round(Int, sqrt(rho * dx^2))
-    # positions = Dewdrop.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
-    # positions = map(positions) do pos
-    #     map(pos) do p
-    #         p.tolist() |> convert2(Float32)
-    #     end
-    # end
-
-    # # * Spatial binning
-    # nbins = 20
-    # edges = range(0, dx, nbins + 1)
-    # ix = [clamp(searchsortedlast(edges, pos[1]), 1, nbins) for pos in positions]
-    # iy = [clamp(searchsortedlast(edges, pos[2]), 1, nbins) for pos in positions]
-    # bin_indices = [Int[] for _ in 1:nbins, _ in 1:nbins]
-    # for (neuron_idx, (bx, by)) in enumerate(zip(ix, iy))
-    #     push!(bin_indices[bx, by], neuron_idx)
-    # end
-
-    # radius = 0.1 # mm
-    # origin = [dx / 2, dx / 2]
-    # mask = map(positions) do pos
-    #     dp = abs.(pos .- origin)
-    #     dp = min.(dp, dx .- dp)
-    #     norm(dp) < radius
-    # end # scatter(positions.|> Point2f, color=mask) to check
-    # local_idxs = findall(mask) |> Dewdrop.numpy.asarray
-
-    # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-    #                   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
-    #                   #   "radial_autocorrelation" => Dewdrop.stats.radial_autocorrelation(positions,
-    #                   #                                                                    0.05))#,
-    #                   #  "efficiency" => Dewdrop.stats.efficiency(bin_indices, 1000))
-    #                   # "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
-    #                   #  "temporal_average" => Dewdrop.stats.temporal_average,
-    #                   #   "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
-    #                   "mua" => mua_func)
-    # stat_funcs = Dict(#"rate" => Dewdrop.stats.firing_rate,
-    #   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
-    #   "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
-    #   "temporal_average" => Dewdrop.stats.temporal_average,
-    #   "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))),
-    # metadata = (; positions, bin_indices, mua_dt, tmax, transient, monitors, dt)
 
     monitors = ["E.spike"] |> pytuple
     stat_funcs = Dict("monitor" => Dewdrop.stats.monitor)
@@ -84,14 +36,13 @@ end
 begin # * The idea is to randomly sample some parameters from discretized parameter distributions. This script can be left running to populate the model cache.
     # * Start by defining parameter ranges to sample from
     parameter_grid = [
-        # Dim{:delta}(range(1, 9, length = 16)), # We are looking for a sweet spot centred
-        # at 4.0
-        Dim{:K_ee}(round.(Int, range(50, 400, length = 16))),
-        Dim{:K_ei}(round.(Int, range(50, 400, length = 16))),
-        Dim{:K_ie}(round.(Int, range(50, 600, length = 16))),
-        Dim{:K_ii}(round.(Int, range(50, 600, length = 16))),
+        Dim{:K_ee}(round.(Int, range(10, 200, length = 8))),
+        Dim{:K_ei}(round.(Int, range(10, 200, length = 8))),
+        Dim{:K_ie}(round.(Int, range(10, 200, length = 8))),
+        Dim{:K_ii}(round.(Int, range(10, 200, length = 8))),
         Dim{:nu}(range(4.0, 12.0, length = 8)),
-        Dim{:J_ei}(range(0.0003, 0.0011, length = 8))
+        Dim{:J_ei}(range(0.0003, 0.0011, length = 8)),
+        Dim{:Delta_g_K}([0.001, 0.002, 0.003, 0.004, 0.005])
         # Dim{:sigma_ee}(range(0.04, 0.1, length = 8)),
         # Dim{:sigma_ei}(range(0.04, 0.12, length = 8)),
         # Dim{:sigma_ie}(range(0.1, 0.2, length = 8)),

@@ -14,47 +14,20 @@ set_theme!(foresight(:physics))
 begin
     model = Dewdrop.models.Nonspatial
     begin # FNS parameters
-        rho = 20000
-        dx = 0.5
-        sigma_ee = 0.075
-        sigma_ei = 0.095
-        sigma_ie = 0.19
-        sigma_ii = 0.19
-        k = 300 / 270
-        K_ee = 390 # 270
-        K_ei = round(Int, k * 420)
-        K_ie = round(Int, k * 180)
-        K_ii = round(Int, k * 200)
-        delta = 3.0
-        nu = 3.65
-        n_ext = 100
-        J_ee = 0.001 # 0.00105
-        J_ei = 0.00145
-        tau_r_i = 2.0
-        tau_d_i = 5.0
+        N_e = 1000
+        nu = 9.0
+        K_ee = 60
+        K_ei = 60
+        K_ie = 60
+        K_ii = 80
+        Delta_g_K = 0.002
     end
 end
 
 begin
     tmax = 10u"s" # * Bump up
     tmin = 5u"s" # The transient. Simulations always begin at 0
-    fixed_params = (; rho,
-                    dx,
-                    sigma_ee,
-                    sigma_ei,
-                    sigma_ie,
-                    sigma_ii,
-                    K_ee,
-                    K_ei,
-                    K_ie,
-                    K_ii,
-                    delta,
-                    nu,
-                    n_ext,
-                    J_ee, # 0.00105
-                    J_ei,
-                    tau_r_i,
-                    tau_d_i)
+    fixed_params = (; N_e, nu, K_ee, K_ei, K_ie, K_ii, Delta_g_K)
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
     # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
@@ -65,57 +38,84 @@ begin # * Run simulation
     m = model(; fixed_params...)
     x = bpsolve(m, tmax; populations = [:E, :I], vars = [:spike, :V],
                 transient = tmin)
+
+    ispikes = x[Population = At(:I), Var = At(:spike)]
+    ispiketimes = map(eachslice(ispikes, dims = Neuron)) do s
+        sts = times(s)[findall(s)]
+    end
+
+    spikes = x[Population = At(:E), Var = At(:spike)]
+    spiketimes = map(eachslice(spikes, dims = Neuron)) do s
+        sts = times(s)[findall(s)]
+    end
 end
 
+begin # * Spike raster
+    f = Figure()
+    ax = Axis(f[1, 1]; xlabel = "Time (ms)", ylabel
+              = "Neuron index", title = "Spike raster")
+    hideydecorations!(ax)
+
+    intrvl = 5000u"ms" .. 5900u"ms"
+    for (i, s) in enumerate(spiketimes)
+        idxs = s .∈ [intrvl]
+        scatter!(ax, ustripall(s[idxs]), i * ones(sum(idxs)), color = :black,
+                 markersize = 3)
+    end
+
+    ax2 = Axis(f[2, 1]; xlabel = "Time (ms)", ylabel
+               = "Neuron index", title = "Spike raster (inhibitory)")
+    for (i, s) in enumerate(ispiketimes)
+        idxs = s .∈ [intrvl]
+        scatter!(ax2, ustripall(s[idxs]), i * ones(sum(idxs)), color = :black,
+                 markersize = 3)
+    end
+    hideydecorations!(ax2)
+    linkxaxes!(ax, ax2)
+    display(f)
+end
 
 begin # * Membrane potential
     V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
     V = set(V, 𝑡 => uconvert.(u"s", times(V)))
     V = rectify(V, dims = 𝑡)
-    lines(V[1:2000, 970]) |> display
+    lines(V[1:300, 1000]) |> display
 end
-begin # * Unit spectrum
-    s = spectrum(V)
-    s = mean(s, dims = Neuron)
-    s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 200]
-    lines(s; axis = (; xscale = log10, yscale = log10)) |> display
-end
+
+# begin # * Unit spectrum
+#     s = spectrum(V .- mean(V, dims = 𝑡), 0.1)
+#     s = mean(s, dims = Neuron)
+#     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 0.1 .. 200]
+#     lines(s; axis = (; xscale = log10, yscale = log10)) |> display
+# end
+
 begin # * MUA spectrum
+    rates = Dewdrop.compute_rates(spikes, 50u"ms")
     mdt = 3.0u"ms"
-    mua = groupby(spikes, 𝑡 => Base.Fix2(group_dt, mdt))
+    mua = groupby(spikes, 𝑡 => Base.Fix2(Dewdrop.group_dt, mdt))
     mua = map(mua) do r
-        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
+        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
     end |> stack
     mua = permutedims(mua, (𝑡, Neuron))
     mua = rectify(mua, dims = 𝑡)
-    N = lookup(mua, Neuron) |> length |> sqrt |> Int
+    N = lookup(mua, Neuron) |> length |> Int
     ts = dims(mua, 𝑡)
-    mua = reshape(mua, (size(mua, 1), N, N))
-    idxs = [i:(i + 9) for i in 1:10:(N - 10 + 1)]
-    idxs = Iterators.product(idxs, idxs)
-    muas = map(idxs) do (i, j)
-        m = mua[:, i, j] # * Get local patch
-        m = mean(m, dims = (2, 3))
-        m = ToolsArray(vec(m), ts)
-        m = set(m, 𝑡 => uconvert.(u"s", times(m)))
-        m = rectify(m, dims = 𝑡)
-        return spectrum(m)
-    end
-    muas = mean(muas)
+    muas = sum(mua, dims = Neuron)
+    muas = dropdims(muas, dims = Neuron) .- mean(muas)
+    muas = set(muas, 𝑡 => uconvert.(u"s", times(muas)))
+    muas = rectify(muas, dims = 𝑡)
+    muas = spectrum(muas, 0.5u"s")
     lines(ustripall(muas)[𝑓 = 1 .. 200]; axis = (; xscale = log10, yscale = log10)) |>
     display
 end
 begin # * Plot inter-spike interval distribution
-    spiketimes = map(eachslice(spikes, dims = Neuron)) do s
-        sts = times(s)[findall(s)]
-    end
     isis = map(spiketimes) do sts
         diff(sts)
     end
     f = Figure()
     ax = Axis(f[1, 1]; xlabel = "Inter-spike interval (ms)",
-              ylabel = "Density", limits = ((0, 100), nothing))
+              ylabel = "Density", limits = ((0, 500), nothing))
     hist!(ax, Iterators.flatten(isis) |> collect |> ustrip, normalization = :pdf,
-          bins = range(0.0, 1000, step = 5))
+          bins = range(0.0, 500, step = 1))
     display(f)
 end
