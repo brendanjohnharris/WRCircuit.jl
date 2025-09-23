@@ -70,6 +70,7 @@ class Spatial(bp.Network):
         e_delay=1.5,  # Synaptic delay. Shencong uses uniform dist. between 0.5 and 2.5
         i_delay=1.5,
         Delta_g_K=0.002,  # Adaptation strength for excitatory neurons
+        tau_K=60.0,
         kernel=ExponentialKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
@@ -141,7 +142,7 @@ class Spatial(bp.Network):
             V_rt=-70.0,
             tau_ref=4.0,
             V_K=-85.0,
-            tau_K=60.0,
+            tau_K=tau_K,
             Delta_g_K=Delta_g_K,
             V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,
@@ -164,7 +165,7 @@ class Spatial(bp.Network):
             V_rt=-70.0,
             tau_ref=4.0,
             V_K=-85.0,
-            tau_K=60.0,
+            tau_K=tau_K,
             Delta_g_K=0.0,  # No adaptation for inhibitory neurons
             V_initializer=bp.init.Uniform(-70.0, -50.0, subkey),
             method=method,

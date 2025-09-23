@@ -20,10 +20,10 @@ begin
         # sigma_ei = 0.095
         # sigma_ie = 0.17
         # sigma_ii = 0.17
-        sigma_ee = 0.03  # from decay=7.5
-        sigma_ei = 0.04  # from decay=9.5
-        sigma_ie = 0.07  # from decay=19
-        sigma_ii = 0.07  # from decay=19
+        sigma_ee = 0.05  # from decay=7.5
+        sigma_ei = 0.06  # from decay=9.5
+        sigma_ie = 0.12  # from decay=19
+        sigma_ii = 0.12  # from decay=19
         # K_ee = 140
         # K_ei = 160
         # K_ie = 100
@@ -32,12 +32,16 @@ begin
         # K_ei = 300
         # K_ie = 140
         # K_ii = 190
-        K_ee = 210
-        K_ei = 350
-        K_ie = 140
-        K_ii = 180
+        K_ee = 255
+        K_ei = 340
+        K_ie = 230
+        K_ii = 290
         nu = 10.0
         n_ext = 100
+        tau_d_e = 5.0   # Increased from 5.0
+        tau_d_i = 4.5  # Increased from 4.5
+        tau_r_i = 2.0   # Increased from 1.0
+        tau_K = 80.0
     end
 end
 
@@ -55,7 +59,11 @@ begin
                     K_ie,
                     K_ii,
                     nu,
-                    n_ext)
+                    n_ext,
+                    tau_d_i,
+                    tau_d_e,
+                    tau_r_i,
+                    tau_K)
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
     # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
@@ -136,20 +144,20 @@ begin # * Spike raster
     display(f)
 end
 
-# begin # * Membrane potential
-#     V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
-#     V = set(V, 𝑡 => uconvert.(u"s", times(V)))
-#     V = rectify(V, dims = 𝑡)
-#     lines(V[1:2000, 970]) |> display
-# end
-begin # * Unit spectrum
-    s = spectrum(V)
-    s = mean(s, dims = Neuron)
-    s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 200]
-    lines(s; axis = (; xscale = log10, yscale = log10)) |> display
+begin # * Membrane potential
+    V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
+    V = set(V, 𝑡 => uconvert.(u"s", times(V)))
+    V = rectify(V, dims = 𝑡)
+    lines(V[1:2000, 970]) |> display
 end
+# begin # * Unit spectrum
+#     s = spectrum(V)
+#     s = mean(s, dims = Neuron)
+#     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 200]
+#     lines(s; axis = (; xscale = log10, yscale = log10)) |> display
+# end
 begin # * MUA spectrum
-    mdt = 3.0u"ms"
+    mdt = 2.0u"ms"
     mua = groupby(spikes, 𝑡 => Base.Fix2(Dewdrop.group_dt, mdt))
     mua = map(mua) do r
         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
@@ -159,8 +167,16 @@ begin # * MUA spectrum
     N = lookup(mua, Neuron) |> length |> sqrt |> Int
     ts = dims(mua, 𝑡)
     mua = reshape(mua, (size(mua, 1), N, N))
-    idxs = [i:(i + 9) for i in 1:10:(N - 10 + 1)]
-    idxs = Iterators.product(idxs, idxs)
+
+    # Calculate number of complete blocks that fit in each dimension
+    block_size = 10
+    num_row_blocks = div(size(mua, 2), block_size)
+    num_col_blocks = div(size(mua, 3), block_size)
+
+    idxs = [((i * block_size + 1):((i + 1) * block_size),
+             (j * block_size + 1):((j + 1) * block_size))
+            for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)]
+
     muas = map(idxs) do (i, j)
         m = mua[:, i, j] # * Get local patch
         m = mean(m, dims = (2, 3))
@@ -169,6 +185,7 @@ begin # * MUA spectrum
         m = rectify(m, dims = 𝑡)
         return spectrum(m)
     end
+
     muas = mean(muas)
     lines(ustripall(muas)[𝑓 = 1 .. 200]; axis = (; xscale = log10, yscale = log10)) |>
     display
