@@ -32,7 +32,7 @@ begin
         # K_ei = 300
         # K_ie = 140
         # K_ii = 190
-        K_ee = 255
+        K_ee = 260
         K_ei = 340
         K_ie = 230
         K_ii = 290
@@ -41,7 +41,8 @@ begin
         tau_d_e = 5.0   # Increased from 5.0
         tau_d_i = 4.5  # Increased from 4.5
         tau_r_i = 2.0   # Increased from 1.0
-        tau_K = 80.0
+        tau_K = 40.0
+        Delta_g_K = 0.003
     end
 end
 
@@ -63,7 +64,8 @@ begin
                     tau_d_i,
                     tau_d_e,
                     tau_r_i,
-                    tau_K)
+                    tau_K,
+                    Delta_g_K)
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
     # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
