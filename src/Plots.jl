@@ -23,7 +23,7 @@ function animate_rates(X, dx; filename,
 
     f = Figure(; figure...)
     ax = Axis(f[1, 1]; axis...)
-    p = scatter!(ax, Point2f.(positions); markersize = 5, color, colormap,
+    p = scatter!(ax, collect(Point2f.(positions)); markersize = 5, color, colormap,
                  colorrange = (0, ustrip(maximum(X))))
     Colorbar(f[1, 2], p; label = "Firing rate (Hz)")
     Makie.record(f, filename, lookup(X, 𝑡); record...) do t

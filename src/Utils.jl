@@ -2,6 +2,7 @@ using Bootstrap
 using Normalization
 using StatsBase
 using Random
+import Accessors: @set
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
        structurefunction, histcounts, timebins, unitarylfp, to_ms, to_mm, pytree2dict
@@ -291,4 +292,13 @@ function compute_rates(spikes::SpikeTrain, dt)
     end |> stack
     rates = permutedims(rates, (𝑡, Neuron))
     rates = rectify(rates, dims = 𝑡)
+end
+
+function log10spectrum(x::AbstractSpectrum)
+    fs = map(log10, lookup(x, 𝑓))
+    set(map(log10, x), 𝑓 => Log10𝑓(fs))
+end
+
+function convert2(u::Unitful.Units, x::AbstractRange)
+    uconvert(u, first(x)):uconvert(u, step(x)):uconvert(u, last(x))
 end

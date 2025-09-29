@@ -13,25 +13,21 @@ set_theme!(foresight(:physics))
 
 begin
     model = Dewdrop.models.Nonspatial
-    begin # FNS parameters
-        N_e = 1000
-        nu = 9.0
-        K_ee = 60
-        K_ei = 60
-        K_ie = 60
-        K_ii = 80
-        Delta_g_K = 0.002
+    begin
+        N_e = 2000
+        nu = 10.0
+        K_ee = 100
+        K_ei = 150
+        K_ie = 80
+        K_ii = 90
+        Delta_g_K = 0.00
     end
 end
 
 begin
-    tmax = 10u"s" # * Bump up
-    tmin = 5u"s" # The transient. Simulations always begin at 0
+    tmax = 7u"s" # * Bump up
+    tmin = 2u"s" # The transient. Simulations always begin at 0
     fixed_params = (; N_e, nu, K_ee, K_ei, K_ie, K_ii, Delta_g_K)
-
-    # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
-    # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-    #                   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10))
 end
 
 begin # * Run simulation
@@ -56,7 +52,7 @@ begin # * Spike raster
               = "Neuron index", title = "Spike raster")
     hideydecorations!(ax)
 
-    intrvl = 5000u"ms" .. 5900u"ms"
+    intrvl = 5000u"ms" .. 5200u"ms"
     for (i, s) in enumerate(spiketimes)
         idxs = s .∈ [intrvl]
         scatter!(ax, ustripall(s[idxs]), i * ones(sum(idxs)), color = :black,

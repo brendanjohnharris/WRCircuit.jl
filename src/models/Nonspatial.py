@@ -40,187 +40,6 @@ from ..synapses import *
 from ..stats import *
 
 
-class SingleNeuron(bp.Network):
-    def __init__(self, FNSnet, pop="E", nu_n_ext=100, n_ext=10):
-        super().__init__()
-        nu = nu_n_ext / n_ext
-        if pop == "E":
-            neuron = FNSnet.E.__class__
-            self.neuron = neuron(
-                size=1,
-                C=FNSnet.E.C,
-                g_L=FNSnet.E.g_L,
-                V_L=FNSnet.E.V_L,
-                V_th=FNSnet.E.V_th,
-                V_rt=FNSnet.E.V_rt,
-                tau_ref=FNSnet.E.tau_ref,
-                V_K=FNSnet.E.V_K,
-                tau_K=FNSnet.E.tau_K,
-                Delta_g_K=FNSnet.E.Delta_g_K,
-                V_initializer=bp.init.Uniform(-55.0, -50.0),
-                method=FNSnet.E.method,
-                embedding=None,
-            )
-        elif pop == "I":
-            neuron = FNSnet.I.__class__
-            self.neuron = neuron(
-                size=1,
-                C=FNSnet.I.C,
-                g_L=FNSnet.I.g_L,
-                V_L=FNSnet.I.V_L,
-                V_th=FNSnet.I.V_th,
-                V_rt=FNSnet.I.V_rt,
-                tau_ref=FNSnet.I.tau_ref,
-                V_K=FNSnet.I.V_K,
-                tau_K=FNSnet.I.tau_K,
-                Delta_g_K=FNSnet.I.Delta_g_K,
-                V_initializer=bp.init.Uniform(-55.0, -50.0),
-                method=FNSnet.I.method,
-                embedding=None,
-            )
-        self.ext = bp.dyn.PoissonGroup(
-            size=n_ext,
-            freqs=nu,
-            keep_size=False,
-            sharding=None,
-            spk_type=None,
-            name=None,
-            mode=None,
-        )
-        self.ext2neuron = Synapse(
-            pre=self.ext,
-            post=self.neuron,
-            conn=bp.connect.All2All(include_self=True),
-            delay=2.0,
-            tau_d=FNSnet.ext2E.tau_d,
-            g_max=FNSnet.J_e,
-        )
-
-
-class DisconnectedFNS(bp.Network):
-    """
-    A spatially independent network of FNS neurons, driven purely by background input
-    """
-
-    def __init__(
-        self,
-        N_e=30000,  # Number of Exc. neurons
-        gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
-        delta=4,  # Per-neuron synaptic weight I:E ratio
-        nu=1,  # External population firing rate
-        n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,  # ! Has same units as g_L: uS
-        method="exp_auto",
-        key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
-    ):
-        super().__init__()
-        self.gamma = gamma
-        self.delta = delta
-        self.nu = nu
-        self.n_ext = n_ext
-        self.J_e = J_e
-        self.method = method
-        self.key = key
-        self.N_e = N_e
-        self.N_i = N_e // gamma
-
-        self.key, subkey = jax.random.split(self.key)
-        exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
-
-        self.key, subkey = jax.random.split(self.key)
-        inh_positions = ClusteredPositions((1.5, 0), 1, key=subkey)
-
-        # neurons
-        self.key, subkey = jax.random.split(self.key)
-        self.E = FNSNeuron(
-            size=N_e,
-            C=0.25,
-            g_L=0.0167,
-            V_L=-70.0,
-            V_th=-50.0,
-            V_rt=-70.0,
-            tau_ref=4.0,
-            V_K=-85.0,
-            tau_K=60.0,
-            Delta_g_K=0.002,
-            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
-            method=method,
-            embedding=exc_positions,
-        )
-
-        # Create a population of inhibitory neurons
-        self.key, subkey = jax.random.split(self.key)
-        self.I = FNSNeuron(
-            size=self.N_i,
-            C=0.25,
-            g_L=0.025,
-            V_L=-70.0,
-            V_th=-50.0,
-            V_rt=-70.0,
-            tau_ref=4.0,
-            V_K=-85.0,
-            tau_K=60.0,
-            Delta_g_K=0.0,  # No adaptation for inhibitory neurons
-            V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
-            method=method,
-            embedding=inh_positions,
-        )
-
-        # External population
-        p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
-        N_ext = int(np.round(self.E.num * p_ext))
-
-        self.key, subkey = jax.random.split(self.key)
-        conn_exte = FixedProb(prob=p_ext, seed=subkey)
-        self.key, subkey = jax.random.split(self.key)
-        conn_exti = FixedProb(prob=p_ext, seed=subkey)
-
-        # Synapses
-        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
-        V_rev_e = 0.0
-        V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
-
-        # External population
-        self.key, subkey = jax.random.split(self.key)
-        self.ext = bp.dyn.PoissonGroup(
-            size=N_ext,
-            freqs=self.nu,
-            keep_size=False,
-            sharding=None,
-            spk_type=None,
-            name=None,
-            mode=None,
-            seed=subkey,
-        )
-        self.ext2E = Synapse(
-            pre=self.ext,
-            post=self.E,
-            conn=conn_exte,
-            delay=2.0,
-            tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
-            V_rev=V_rev_e,
-        )
-        self.ext2I = Synapse(
-            pre=self.ext,
-            post=self.I,
-            conn=conn_exti,
-            delay=2.0,
-            tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
-            V_rev=V_rev_e,
-        )
-
-        # define input variables given to E/I populations
-        self.Ein = bp.dyn.InputVar(self.E.varshape)
-        self.Iin = bp.dyn.InputVar(self.I.varshape)
-        self.E.add_inp_fun("", self.Ein)
-        self.I.add_inp_fun("", self.Iin)
-
-
 class Nonspatial(bp.Network):
     """
     A spatially independent network of FNS neurons.
@@ -228,22 +47,22 @@ class Nonspatial(bp.Network):
 
     def __init__(
         self,
-        N_e=1000,  # Number of Exc. neurons
+        N_e=2000,  # Number of Exc. neurons
         K_ee=60,
         K_ei=60,
         K_ie=60,
         K_ii=80,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
-        nu=7.0,  # External population firing rate
+        nu=10.0,  # External population firing rate
         n_ext=100,  # Number of external synapses per Exc. neuron
-        J_ee=0.00105,  # ! Has same units as g_L: uS
+        J_ee=0.00105,
         J_ei=0.00145,
         tau_r_e=1.0,
-        tau_r_i=1.0,
+        tau_r_i=2.0,
         tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
         tau_d_i=4.0,  # 3.0 for yifan, # 4.5 for shencong
-        Delta_g_K=0.002,  # Adaptation strength for excitatory neurons
+        Delta_g_K=0.003,  # Adaptation strength for excitatory neurons
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
         copy_conn=False,  # Whether to copy connectivity from the provided network
@@ -366,47 +185,50 @@ class Nonspatial(bp.Network):
         e_delay = 1.5
         i_delay = 2.0
 
+        self.key, subkey = jax.random.split(self.key)
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
             delay=e_delay,
             conn=conn_ee,
             tau_d=tau_d_e,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
-        # self.key, subkey = jax.random.split(self.key)
+        self.key, subkey = jax.random.split(self.key)
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
             delay=e_delay,
             conn=conn_ei,
             tau_d=tau_d_e,
-            tau_r=tau_r_e,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2E = Synapse(
             pre=self.I,
             post=self.E,
             delay=i_delay,
             conn=conn_ie,
             tau_d=tau_d_i,
-            tau_r=tau_r_i,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2I = Synapse(
             pre=self.I,
             post=self.I,
             delay=i_delay,
             conn=conn_ii,
             tau_d=tau_d_i,
-            tau_r=tau_r_i,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
@@ -423,6 +245,7 @@ class Nonspatial(bp.Network):
             mode=None,
             seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
@@ -430,9 +253,10 @@ class Nonspatial(bp.Network):
             delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_ee,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,
@@ -440,7 +264,7 @@ class Nonspatial(bp.Network):
             delay=e_delay,
             tau_d=tau_d_e,
             g_max=self.J_ei,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
 

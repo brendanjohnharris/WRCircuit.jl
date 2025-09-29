@@ -4,6 +4,7 @@ authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
 version = "1.0.0-DEV"
 
 [deps]
+Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
 Autocorrelations = "b9118d5e-f165-4cbd-b2ae-b030566b7b26"
 Bootstrap = "e28b5b4c-05e8-5b66-bc03-6f0c0a0a06e0"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
@@ -22,6 +23,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MeanSquaredDisplacement = "13c93d70-909c-440c-af92-39d48ffa2ba2"
 MoreMaps = "d6ea422f-1f55-4be1-bfc3-e7c09aa4d855"
 Normalization = "be38d6a3-8366-4a42-ad57-222272b5bbe7"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
@@ -38,6 +40,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 USydClusters = {rev = "main", url = "https://github.com/brendanjohnharris/UsydClusters.jl/"}
 
 [compat]
+Accessors = "0.1.42"
 Autocorrelations = "0.1.0"
 Bootstrap = "2.4.0"
 CairoMakie = "0.15.6"
@@ -56,6 +59,7 @@ LinearAlgebra = "1.11.0"
 MeanSquaredDisplacement = "0.2.1"
 MoreMaps = "0.2.1"
 Normalization = "0.9"
+Optim = "1.13.2"
 Random = "1.11.0"
 SparseArrays = "1.11.0"
 StableDistributions = "1.0.1"

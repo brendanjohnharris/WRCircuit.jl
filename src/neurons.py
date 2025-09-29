@@ -284,7 +284,7 @@ class FNSNeuron(GradNeuDyn):
         # update variables
         self.V.value = V
         self.g_K.value = g_K
-        self.input.value = I_rec
+        self.input.value = I  # I_rec
         self.spike.value = spike
         self.t_last_spike.value = t_last_spike
         return spike
