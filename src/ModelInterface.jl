@@ -3,10 +3,11 @@ using TimeseriesTools
 using DimensionalData
 using IntervalSets
 using Unitful
-export bprun, bpsolve, bpsweep, Neuron, Population
+export bprun, bpsolve, bpsweep, Neuron, Population, Monitor
 
 DimensionalData.@dim Neuron ToolsDim
 DimensionalData.@dim Population ToolsDim
+DimensionalData.@dim Monitor ToolsDim
 
 function python_reshape(A, ds...)
     return PermutedDimsArray(reshape(A, ds), reverse(1:length(ds)))
@@ -93,13 +94,14 @@ end
 """
 Format an arbitrary batch computation, e.g. monitor output of stats_run
 """
-function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata)
+function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata,
+                     delete_key = true)
     transient = metadata[:transient]
     tmax = metadata[:tmax]
     dt = metadata[:dt]
     monitors = keys(batch_res) |> collect#.keys() |> convert2(Vector{String})
     sweep_parameters = deepcopy(sweep_parameters)
-    if haskey(sweep_parameters, "key")
+    if haskey(sweep_parameters, "key") && delete_key
         sweep_parameters = delete!(sweep_parameters, "key")
     end
     vs = values(sweep_parameters)
@@ -131,18 +133,18 @@ function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata)
         out = map(res) do r
             r[Obs = At(p)]
         end
-        Dict(monitors .=> out)
+        NamedTuple{Tuple(Symbol.(monitors))}(out)
     end
     res = Dict(sweep_parameters .=> res)
 end
 
-function batchformat(batch_res, sweep_parameters, ::Val{:mua}; metadata)
+function batchformat(batch_res, sweep_parameters, ::Val{:mua}; metadata, delete_key = true)
     transient = metadata[:transient]
     tmax = metadata[:tmax]
     dt = metadata[:mua_dt]
     monitors = keys(batch_res) |> collect#.keys() |> convert2(Vector{String})
     sweep_parameters = deepcopy(sweep_parameters)
-    if haskey(sweep_parameters, "key")
+    if haskey(sweep_parameters, "key") && delete_key
         sweep_parameters = delete!(sweep_parameters, "key")
     end
     vs = values(sweep_parameters)
@@ -164,20 +166,21 @@ function batchformat(batch_res, sweep_parameters, ::Val{:mua}; metadata)
         out = map(res) do r
             r[Obs = At(p)]
         end
-        Dict(monitors .=> out)
+        NamedTuple{Tuple(Symbol.(monitors))}(out)
     end
     res = Dict(sweep_parameters .=> res)
 end
 function batchformat(r, sweep_parameters, param::Symbol; kwargs...)
-    batchformat(r, sweep_parameters, Val(param); kwargs...)
+    return batchformat(r, sweep_parameters, Val(param); kwargs...)
 end
-function batchformat(stats, sweep_parameters; metadata)
+function batchformat(stats, sweep_parameters; metadata, delete_key = true)
     stats = pyconvert(Dict, stats)
     sweep_parameters = pyconvert(Dict, sweep_parameters)
     map(collect(stats)) do (stat, res)
-        return stat => batchformat(pyconvert(Dict, res), sweep_parameters, Symbol(stat);
-                                   metadata)
-    end |> Dict
+        d = pyconvert(Dict, res)
+        d = batchformat(d, sweep_parameters, Symbol(stat); metadata, delete_key)
+        return Symbol(stat) => d
+    end |> NamedTuple
 end
 
 @generated sortparams(nt::NamedTuple{KS}) where {KS} = :(NamedTuple{$(Tuple(sort(collect(KS))))}(nt))
@@ -256,6 +259,10 @@ end
 function string_keys(d::Dict{String, T}) where {T}
     return d
 end
+function string_keys(d::NamedTuple)
+    return d |> pairs |> Dict |> string_keys
+end
+
 function partial_vmap(func; batch_size = nothing, kwargs...)
     function _map(x; batch_size = batch_size)
         if isnothing(batch_size)

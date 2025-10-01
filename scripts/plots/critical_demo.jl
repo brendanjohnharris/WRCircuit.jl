@@ -45,7 +45,7 @@ begin
 end
 
 begin
-    tmax = 10u"s" # * Bump up
+    tmax = 22u"s" # * Bump up
     tmin = 2u"s" # The transient. Simulations always begin at 0
     fixed_params = (; rho,
                     dx,

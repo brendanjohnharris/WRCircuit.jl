@@ -15,6 +15,7 @@ function _preamble()
         using Statistics
         using TimeseriesTools
         using CairoMakie
+        using TimeseriesMakie
         using Foresight
         using LinearAlgebra
         using Distributed

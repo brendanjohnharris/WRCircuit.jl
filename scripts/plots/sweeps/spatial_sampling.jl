@@ -86,18 +86,16 @@ begin # * The idea is to randomly sample some parameters from discretized parame
     parameter_grid = [
         # Dim{:delta}(range(1, 9, length = 16)), # We are looking for a sweet spot centred
         # at 4.0
-        Dim{:K_ee}(round.(Int, range(50, 400, length = 16))),
-        Dim{:K_ei}(round.(Int, range(50, 400, length = 16))),
-        Dim{:K_ie}(round.(Int, range(50, 600, length = 16))),
-        Dim{:K_ii}(round.(Int, range(50, 600, length = 16))),
-        Dim{:nu}(range(4.0, 12.0, length = 8)),
-        Dim{:J_ei}(range(0.0003, 0.0011, length = 8))
+        Dim{:K_ee}(round.(Int, range(200, 300, length = 16))),
+        Dim{:K_ei}(round.(Int, range(300, 400, length = 16))),
+        Dim{:K_ie}(round.(Int, range(100, 300, length = 16))),
+        Dim{:K_ii}(round.(Int, range(250, 350, length = 16))),
         # Dim{:sigma_ee}(range(0.04, 0.1, length = 8)),
         # Dim{:sigma_ei}(range(0.04, 0.12, length = 8)),
         # Dim{:sigma_ie}(range(0.1, 0.2, length = 8)),
         # Dim{:sigma_ii}(range(0.2, 0.2, length = 8)),
         # Dim{:J_ee}(range(0.0005, 0.0015, length = 16)),
-        # Dim{:J_ei}(range(0.0005, 0.002, length = 16)),
+        Dim{:J_ei}(range(0.00105, 0.00185, length = batch_size))
         # Dim{:tau_r_e}(range(0.5, 3.0, length = 8)),
         # Dim{:tau_r_i}(range(0.5, 3.0, length = 8)),
         # Dim{:tau_d_e}(range(2.0, 8.0, length = 8)),
