@@ -137,7 +137,6 @@ function batchformat(batch_res, sweep_parameters, ::Val{:monitor}; metadata,
     end
     res = Dict(sweep_parameters .=> res)
 end
-
 function batchformat(batch_res, sweep_parameters, ::Val{:mua}; metadata, delete_key = true)
     transient = metadata[:transient]
     tmax = metadata[:tmax]

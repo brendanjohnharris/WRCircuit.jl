@@ -20,6 +20,7 @@ function _preamble()
         using LinearAlgebra
         using Distributed
         using Term
+        using MoreMaps
         using SparseArrays
         using MeanSquaredDisplacement
         using Distributions
