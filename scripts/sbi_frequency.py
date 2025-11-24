@@ -24,7 +24,7 @@ from sbi.inference import SNPE, prepare_for_sbi
 from sbi.utils import BoxUniform
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.models.FNS import FNS
+from src.models.Nonspatial import FNS
 
 # --------------------------------------------------------------------------------
 # Globals / Constants

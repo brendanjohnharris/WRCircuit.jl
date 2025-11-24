@@ -22,11 +22,14 @@ from brainpy.initialize import (
     Uniform,
     variable_,
     noise as init_noise,
+    parameter,
 )
 from brainpy import share
 from brainpy.types import Shape, ArrayType
 from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
+from brainpy._src.connect.base import get_idx_type
+from brainpy._src.dyn.utils import get_spk_type
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 
@@ -244,14 +247,6 @@ class FNSNeuron(GradNeuDyn):
         V, g_K = self.integral(self.V.value, self.g_K.value, t, I, dt)
         V += self.sum_delta_inputs()  # And the delta inputs
 
-        # jax.debug.print(str(jnp.any(jnp.isnan(V)).value))
-        # jax.lax.cond(
-        #     jnp.any(jnp.isnan(V)),  # Condition
-        #     lambda _: nanerror(),  # If True, raise an error
-        #     lambda _: None,  # If False, do nothing
-        #     operand=None,
-        # )
-
         # refractory period
         refractory = (t - self.t_last_spike) <= self.tau_ref
         V = bm.where(refractory, self.V.value, V)
@@ -289,7 +284,7 @@ class FNSNeuron(GradNeuDyn):
         # update variables
         self.V.value = V
         self.g_K.value = g_K
-        self.input.value = I_rec
+        self.input.value = I  # I_rec
         self.spike.value = spike
         self.t_last_spike.value = t_last_spike
         return spike
@@ -419,3 +414,51 @@ class LIFNeuron(bp.dyn.LifRef):
         }
         out["embedding"] = {self.embedding.__class__.__name__: self.embedding.to_dict()}
         return out
+
+
+class PoissonGroup(bp.dyn.NeuDyn):
+    def __init__(
+        self,
+        size: Shape,
+        freqs: Union[int, float, jax.Array, bm.Array, Callable],
+        keep_size: bool = False,
+        sharding: Optional[Sequence[str]] = None,
+        spk_type: Optional[type] = None,
+        name: Optional[str] = None,
+        mode: Optional[bm.Mode] = None,
+        seed: Union[int, jnp.ndarray] = 42,
+    ):
+        super().__init__(
+            size=size, sharding=sharding, name=name, keep_size=keep_size, mode=mode
+        )
+        # parameters
+        self.freqs = parameter(freqs, self.num, allow_none=False)
+        self.spk_type = get_spk_type(spk_type, self.mode)
+
+        # Make the seed a brainpy variable so it's tracked in JAX transformations.
+        # Just convert to a PRNGKey if you want to allow integer seeds.
+        if isinstance(seed, int):
+            seed = jax.random.PRNGKey(seed)
+        self.seed = self.init_variable(
+            lambda shape: seed,  # must accept one argument for shape
+            shape=seed.shape,  # the shape is (2,)
+            batch_or_mode=None,
+        )
+
+        # variables
+        self.reset_state(self.mode)
+
+    def update(self):
+        key, subkey = jax.random.split(self.seed.value)
+        self.seed.value = key
+        spikes = jax.random.uniform(
+            subkey, shape=self.spike.shape, dtype=jnp.float32
+        ) <= (self.freqs * bp.share["dt"] / 1000.0)
+
+        self.spike.value = spikes
+        return spikes
+
+    def reset_state(self, batch_or_mode=None, **kwargs):
+        self.spike = self.init_variable(
+            partial(jnp.zeros, dtype=self.spk_type), batch_or_mode
+        )

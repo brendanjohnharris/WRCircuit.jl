@@ -17,36 +17,21 @@ begin
     modelname = "FNS"
 
     begin # FNS parameters
-        N_e = 5000
+        N_e = 4000
         J_e = 0.0008 # Microsiemens
-        delta = 3.0 # 2.9
-        nu = 10 # Preserve; the minimum required for spontaneous spiking
-        n_ext = 70
+        delta = 4.0
+        nu = 10
+        n_ext = 80
 
-        # ? Notes:
-        # - A positive (real part) eigenvalue means the system is unstable
-        # - Two negative eigenvalues means excitatory bursts are immediately quenched
-        # - Two complex eigenvalue means oscillation (PING). More complex means sparser exc. activity?
-
-        # - Higher cross-coupling terms make the excitatory activity sparser, oscillations stronger
-        # - Increasing omega_ee does not increase the frequency of oscillations, just sharpens them
-        # - Increasing omega_ii sharpens the oscillations
-        #!- Increasing background drive increases frequency... makes sense, reduces recovery time of
-        #   exc. pop
-        # - Adaptation doesn't seem to induce theta oscillations without the spatial component... so
-        #   we should look at adding a central stimulus to the spatial model, like shencong.
-
-        # ! Exact frequency fo gamma oscillation depends on E and I timescales
-
-        omicron = 0.03 # This omicron actually controls the frequency of ping; smaller alpha, higher frequency...
-        omega = [0.12 0.21; 0.25 0.33]
+        omicron = 0.06 # This omicron actually controls the frequency of ping; smaller alpha, higher frequency...
+        omega = [0.3 0.47; 0.37 0.65]
     end
 end
 begin
     parameters = (; N_e, J_e, delta, nu, n_ext)
 
-    deltas = range(1.0, 3, length = 25)
-    omicrons = range(0.02, 0.1, length = 3)
+    deltas = range(2.0, 6.0, length = 10)
+    omicrons = range(0.06, 0.06, length = 1)
 
     T = 10u"s"
     transient = 5u"s"
@@ -70,8 +55,8 @@ begin # * Generate a bifurcation diagram over deltas and o-scale
                           duration = T,
                           transient,
                           populations = [:E],
-                          vars = [:spike],
-                          num_parallel = 20,
+                          vars = [:spike, :input],
+                          num_parallel = 1,
                           batch_size = 20,
                           batch_seed = 42)
             res = res[Population = At(:E), Var = At(:spike)]
@@ -89,19 +74,19 @@ begin # * Generate a bifurcation diagram over deltas and o-scale
                 λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
                 λ = uconvert.(u"Hz", mean(λ))
             end
-            begin # * Maximum of power spectrum
-                lfp = unitarylfp(times(spikes), parent(spikes), :E)
-                lfp = set(lfp, 𝑡 => times(lfp) .* u"ms")
-                lfp = set(lfp, 𝑡 => uconvert.(u"s", times(lfp)))
-                lfp = rectify(lfp; dims = 𝑡, tol = 1)
-                # * Take the power spectrum
-                s = spectrum(lfp .- mean(lfp))
-                # * Find the maximum frequency
-                f_max = findmax(s) |> last
-                f_max = freqs(s)[f_max]
-            end
+            # begin # * Maximum of power spectrum
+            #     lfp = unitarylfp(times(spikes), parent(spikes), :E)
+            #     lfp = set(lfp, 𝑡 => times(lfp) .* u"ms")
+            #     lfp = set(lfp, 𝑡 => uconvert.(u"s", times(lfp)))
+            #     lfp = rectify(lfp; dims = 𝑡, tol = 1)
+            #     # * Take the power spectrum
+            #     s = spectrum(lfp .- mean(lfp))
+            #     # * Find the maximum frequency
+            #     f_max = findmax(s) |> last
+            #     f_max = freqs(s)[f_max]
+            # end
             # Dewdrop.clear_live_arrays() # Does this operate @everywhere? Seems not
-            return ToolsArray([χ, λ, f_max], (Dim{:statistic}([:χ, :λ, :f_max]),)) # Can only return non-python objects
+            return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end
     stats = ToolsArray(stats, (Dim{:omicron}(omicrons),)) |> stack

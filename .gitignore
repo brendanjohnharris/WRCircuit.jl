@@ -6,6 +6,9 @@
 *.jld2
 *.mat
 *.mp4
+*.png
+*.pdf
+*.svg
 *.parquet
 .CondaPkg/
 .CondaPkg copy/
@@ -20,3 +23,7 @@ docs/build/
 docs/site/
 lcov*.info
 __pycache__/
+*.json
+*.pickle
+.nfs*
+.CondaPkgOld/

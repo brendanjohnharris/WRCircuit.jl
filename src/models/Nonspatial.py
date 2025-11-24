@@ -1,6 +1,7 @@
 import brainpy as bp
 import brainpy.math as bm
 from brainpy.connect import TwoEndConnector
+
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
@@ -28,90 +29,87 @@ from brainpy.types import Shape, ArrayType
 from brainpy.check import is_initializer
 from brainpy import odeint, sdeint, JointEq
 from brainpy._src.connect.base import get_idx_type
+from brainpy._src.dyn.utils import get_spk_type
 from typing import Union, Callable, Optional, Sequence, Any
 from functools import partial
 from ..utils import *
 from ..distances import *
-from ..neurons import FNSNeuron
+from ..neurons import FNSNeuron, PoissonGroup
 from ..positions import *
 from ..synapses import *
+from ..stats import *
 
 
-class Dewdrop(bp.Network):
+class Nonspatial(bp.Network):
     """
-    A spatially embedded network of FNS neurons.
-    network
+    A spatially independent network of FNS neurons.
     """
 
     def __init__(
         self,
-        rho=30000,  # Density of Exc. neurons (neurons per mm^2)
-        dx=1.0,  # Width of the spatial domain (mm)
-        sigma_ee=0.125,  # Width of the distance-dependent connectivity kernel (mm)
-        sigma_ei=0.1,
-        sigma_ie=0.1,
-        sigma_ii=0.125,
-        omega_ee=0.1,  # Total 'mass' of connectivity probability (proportional to num. synapses)
-        omega_ei=0.2,
-        omega_ie=0.3,
-        omega_ii=0.3,
-        boundary="periodic",
-        include_self=False,
+        N_e=2000,  # Number of Exc. neurons
+        K_ee=60,
+        K_ei=60,
+        K_ie=60,
+        K_ii=80,
         gamma=4,  # Ratio of num. Exc. to num. Inh. neurons
         delta=4,  # Per-neuron synaptic weight I:E ratio
-        nu=1,  # External population firing rate
-        n_ext=10,  # Number of external synapses per Exc. neuron
-        J_e=0.0008,  # ! Currently abitrary. Has same units as g_L? uS
-        kernel=GaussianKernel,
+        nu=10.0,  # External population firing rate
+        n_ext=100,  # Number of external synapses per Exc. neuron
+        J_ee=0.00105,
+        J_ei=0.00145,
+        tau_r_e=1.0,
+        tau_r_i=2.0,
+        tau_d_e=5.0,  # * Excitatory synapse decays more slowly than inhibitory
+        tau_d_i=4.0,  # 3.0 for yifan, # 4.5 for shencong
+        Delta_g_K=0.003,  # Adaptation strength for excitatory neurons
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
-        copy_conn=False,  # Whether to copy connectivity from the provided Dewdrop
+        copy_conn=False,  # Whether to copy connectivity from the provided network
     ):
         super().__init__()
-
-        self.rho = rho
-        self.dx = dx
-        self.sigma_ee = sigma_ee
-        self.sigma_ei = sigma_ei
-        self.sigma_ie = sigma_ie
-        self.sigma_ii = sigma_ii
-        self.omega_ee = omega_ee
-        self.omega_ei = omega_ei
-        self.omega_ie = omega_ie
-        self.omega_ii = omega_ii
-        self.p_ee = kernel.mass2pmax(omega_ee, sigma_ee)
-        self.p_ei = kernel.mass2pmax(omega_ei, sigma_ei)
-        self.p_ie = kernel.mass2pmax(omega_ie, sigma_ie)
-        self.p_ii = kernel.mass2pmax(omega_ii, sigma_ii)
-        self.boundary = boundary
-        self.include_self = include_self
         self.gamma = gamma
         self.delta = delta
         self.nu = nu
         self.n_ext = n_ext
-        self.J_e = J_e
-        self.J_i = (
-            self.J_e * delta
-        )  # !!! Not negative, because the reversal threshold for the inhibitory synapses is negative
+        self.J_ee = J_ee
+        self.J_ei = J_ei
         self.method = method
-        self.kernel = kernel
         self.key = key
 
-        # geometry
-        A = dx**2
-        ne = round(np.sqrt(rho * A))  # Number of grid points in each dimension
-        ni = round((ne**2) / gamma)
+        self.N_e = N_e
+        self.N_i = N_e // gamma
 
-        # dx bounds the grid, assuming left bottom corner is at (0, 0)
-        exc_positions = GridPositions((dx, dx))
+        self.K_ee = K_ee
+        self.K_ei = K_ei
+        self.K_ie = K_ie
+        self.K_ii = K_ii
+        self.omega_ee = self.required_omega("ee")
+        self.omega_ie = self.required_omega("ie")
+        self.omega_ei = self.required_omega("ei")
+        self.omega_ii = self.required_omega("ii")
+
+        self.tau_r_e = tau_r_e
+        self.tau_r_i = tau_r_i
+        self.tau_d_e = (
+            tau_d_e  # * Excitatory synapse decays more slowly than inhibitory
+        )
+        self.tau_d_i = tau_d_i  # 3.0 for yifan, # 4.5 for shencong
+
+        self.J_ie = (J_ee * K_ee) * self.delta / K_ie
+        self.J_ii = (J_ei * K_ei) * self.delta / K_ii
+        self.Delta_g_K = Delta_g_K
 
         self.key, subkey = jax.random.split(self.key)
-        inh_positions = RandomPositions((dx, dx), subkey)
+        exc_positions = ClusteredPositions((-1.5, 0), 1, key=subkey)
+
+        self.key, subkey = jax.random.split(self.key)
+        inh_positions = ClusteredPositions((1.5, 0), 1, key=subkey)
 
         # neurons
         self.key, subkey = jax.random.split(self.key)
         self.E = FNSNeuron(
-            size=[ne, ne],
+            size=N_e,
             C=0.25,
             g_L=0.0167,
             V_L=-70.0,
@@ -120,7 +118,7 @@ class Dewdrop(bp.Network):
             tau_ref=4.0,
             V_K=-85.0,
             tau_K=60.0,
-            Delta_g_K=0.002,
+            Delta_g_K=Delta_g_K,  # 0.003 for guazhang, 0.002 for shencong
             V_initializer=bp.init.Uniform(-55.0, -50.0, subkey),
             method=method,
             embedding=exc_positions,
@@ -129,7 +127,7 @@ class Dewdrop(bp.Network):
         # Create a population of inhibitory neurons
         self.key, subkey = jax.random.split(self.key)
         self.I = FNSNeuron(
-            size=ni,
+            size=self.N_i,
             C=0.25,
             g_L=0.025,
             V_L=-70.0,
@@ -143,8 +141,6 @@ class Dewdrop(bp.Network):
             method=method,
             embedding=inh_positions,
         )
-
-        # Connectivity topology
 
         # External population
         p_ext = np.sqrt(self.n_ext / self.E.num)  # !!! Check !!!
@@ -161,7 +157,7 @@ class Dewdrop(bp.Network):
             return CSRConn(indices, inptr)
 
         if copy_conn:
-            if isinstance(copy_conn, Dewdrop):
+            if isinstance(copy_conn, FNS):
                 copy_conn = copy_conn.get_connectivity()
 
             conn_ee = copy_connectivity(copy_conn["E2E"])
@@ -170,76 +166,33 @@ class Dewdrop(bp.Network):
             conn_ii = copy_connectivity(copy_conn["I2I"])
             conn_exte = copy_connectivity(copy_conn["ext2E"])
             conn_exti = copy_connectivity(copy_conn["ext2I"])
-            self.N_e = copy_conn["N_e"]
-            self.N_i = copy_conn["N_i"]
 
         else:
-            self.key, subkey = jax.random.split(self.key)
-            conn_ee = DistanceDependent(
-                kernel=kernel(sigma=self.sigma_ee, p_max=self.p_ee),
-                domain=self.E.embedding.domain,
-                positions_pre=self.E.positions,
-                positions_post=self.E.positions,
-                boundary=boundary,
-                include_self=include_self,
-                seed=subkey,
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ei = DistanceDependent(
-                kernel=kernel(sigma=self.sigma_ei, p_max=self.p_ei),
-                domain=self.E.embedding.domain,
-                positions_pre=self.E.positions,
-                positions_post=self.I.positions,
-                boundary=boundary,
-                include_self=include_self,
-                seed=subkey,
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ie = DistanceDependent(
-                kernel=kernel(sigma=self.sigma_ie, p_max=self.p_ie),
-                domain=self.I.embedding.domain,
-                positions_pre=self.I.positions,
-                positions_post=self.E.positions,
-                boundary=boundary,
-                include_self=include_self,
-                seed=subkey,
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_ii = DistanceDependent(
-                kernel=kernel(sigma=self.sigma_ii, p_max=self.p_ii),
-                domain=self.I.embedding.domain,
-                positions_pre=self.I.positions,
-                positions_post=self.I.positions,
-                boundary=boundary,
-                include_self=include_self,
-                seed=subkey,
-            )
 
-            self.key, subkey = jax.random.split(self.key)
-            conn_exte = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
-            self.key, subkey = jax.random.split(self.key)
-            conn_exti = bp.connect.FixedProb(
-                prob=p_ext, allow_multi_conn=True, seed=subkey
-            )
+            self.key, *subkeys = jax.random.split(self.key, 7)
+            conn_ee = FixedProb(prob=self.omega_ee, seed=subkeys[0])
+            conn_ei = FixedProb(prob=self.omega_ei, seed=subkeys[1])
+            conn_ie = FixedProb(prob=self.omega_ie, seed=subkeys[2])
+            conn_ii = FixedProb(prob=self.omega_ii, seed=subkeys[3])
 
-            self.N_e = self.E.size
-            self.N_i = self.I.size
+            conn_exte = FixedProb(prob=p_ext, seed=subkeys[4])
+            conn_exti = FixedProb(prob=p_ext, seed=subkeys[5])
 
         # Synapses
-        tau_d_e = 5.0  # * Excitatory synapse decays more slowly than inhibitory
-        tau_d_i = 4.5  # 3.0 for yifan, # 4.5 for shencong
         V_rev_e = 0.0
         V_rev_i = -80.0  # ? Makes the inhibitory synapses inhibitory
 
+        e_delay = 1.5
+        i_delay = 2.0
+
+        self.key, subkey = jax.random.split(self.key)
         self.E2E = Synapse(
             pre=self.E,
             post=self.E,
-            delay=2.0,
+            delay=e_delay,
             conn=conn_ee,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
@@ -248,39 +201,41 @@ class Dewdrop(bp.Network):
         self.E2I = Synapse(
             pre=self.E,
             post=self.I,
-            delay=2.0,
+            delay=e_delay,
             conn=conn_ei,
             tau_d=tau_d_e,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_e,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2E = Synapse(
             pre=self.I,
             post=self.E,
-            delay=2.0,
+            delay=i_delay,
             conn=conn_ie,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
+        self.key, subkey = jax.random.split(self.key)
         self.I2I = Synapse(
             pre=self.I,
             post=self.I,
-            delay=2.0,
+            delay=i_delay,
             conn=conn_ii,
             tau_d=tau_d_i,
-            tau_r=1.0,
+            tau_r=bp.init.Normal(tau_r_i, 0.05 * tau_r_i, subkey),
             g_max=0.0,  # This gets updated later when we call reinit_weights
             V_rev=V_rev_i,
         )
 
         # External population
         self.key, subkey = jax.random.split(self.key)
-        self.ext = bp.dyn.PoissonGroup(
+        self.ext = PoissonGroup(
             size=N_ext,
             freqs=self.nu,
             keep_size=False,
@@ -290,24 +245,26 @@ class Dewdrop(bp.Network):
             mode=None,
             seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
             conn=conn_exte,
-            delay=2.0,
+            delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
+            g_max=self.J_ee,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,
             conn=conn_exti,
-            delay=2.0,
+            delay=e_delay,
             tau_d=tau_d_e,
-            g_max=self.J_e,
-            tau_r=1.0,
+            g_max=self.J_ei,
+            tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
 
@@ -318,42 +275,77 @@ class Dewdrop(bp.Network):
         self.I.add_inp_fun("", self.Iin)
 
         # * Posthoc weight updates to maintain mean_weight = 1/sqrt(in-degree) per neuron
-        self.reinit_weights(self.delta, self.J_e)  # !! Need to fix it seems
+        self.reinit_weights(self.delta, (self.J_ee, self.J_ei))
 
-    def reinit_weights(self, delta=None, J_e=None):
+    def reinit_weights(self, delta, J_e):
         if delta is not None:
             self.delta = delta
         if J_e is not None:
-            self.J_e = J_e
-        self.J_i = self.J_e * self.delta
+            self.J_ee = J_e[0]
+            self.J_ei = J_e[1]
+
+        self.J_ie = self.J_ee * self.delta
+        self.J_ii = self.J_ei * self.delta
+
+        self.J_ie = self.J_ee * self.delta
+        self.J_ii = self.J_ei * self.delta
         self.key, subkey = jax.random.split(self.key)
         self.E2E.proj.comm.weight = correlate_weights(
             self.E2E.proj,
-            self.J_e,
+            self.J_ee,
             self.N_e,
             subkey,  # ? Need to pass N_ee to keep this function jittable.
         )
         self.key, subkey = jax.random.split(self.key)
         self.E2I.proj.comm.weight = correlate_weights(
-            self.E2I.proj, self.J_e, self.N_i, subkey
+            self.E2I.proj, self.J_ei, self.N_i, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.I2E.proj.comm.weight = correlate_weights(
-            self.I2E.proj, self.J_i, self.N_e, subkey
+            self.I2E.proj, self.J_ie, self.N_e, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.I2I.proj.comm.weight = correlate_weights(
-            self.I2I.proj, self.J_i, self.N_i, subkey
+            self.I2I.proj, self.J_ii, self.N_i, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.ext2E.proj.comm.weight = correlate_weights(
-            self.ext2E.proj, self.J_e, self.N_e, subkey
+            self.ext2E.proj, self.J_ee, self.N_e, subkey
         )
         self.key, subkey = jax.random.split(self.key)
         self.ext2I.proj.comm.weight = correlate_weights(
-            self.ext2I.proj, self.J_e, self.N_i, subkey
+            self.ext2I.proj, self.J_ei, self.N_i, subkey
         )
         self.reset_state()  ## or bp.reset_state(self)??
+
+        # # ! Need to fix
+        # K_ee = indegrees_static(self.E2E.proj.comm.indices, self.N_e)
+        # K_ei = indegrees_static(self.E2I.proj.comm.indices, self.N_i)
+        # K_ie = indegrees_static(self.I2E.proj.comm.indices, self.N_e)
+        # K_ii = indegrees_static(self.I2I.proj.comm.indices, self.N_i)
+        # K_ext_e = indegrees_static(self.ext2E.proj.comm.indices, self.N_e)
+        # K_ext_i = indegrees_static(self.ext2I.proj.comm.indices, self.N_i)
+
+        # w_ee = draw_lognormal(self.J_ee, self.J_ee / 4, jnp.sum(K_ee))
+        # w_ei = draw_lognormal(self.J_ei, self.J_ei / 4, jnp.sum(K_ei))
+        # w_ie = draw_lognormal(self.J_ie, self.J_ie / 4, jnp.sum(K_ie))
+        # w_ii = draw_lognormal(self.J_ii, self.J_ii / 4, jnp.sum(K_ii))
+        # w_ext_e = draw_lognormal(self.J_ee, self.J_ee / 4, jnp.sum(K_ext_e))
+        # w_ext_i = draw_lognormal(self.J_ei, self.J_ei / 4, jnp.sum(K_ext_i))
+
+        # w_ee = sorted_block_assignment(w_ee, K_ee)
+        # w_ei = sorted_block_assignment(w_ei, K_ei)
+        # w_ie = sorted_block_assignment(w_ie, K_ie)
+        # w_ii = sorted_block_assignment(w_ii, K_ii)
+        # w_ext_e = sorted_block_assignment(w_ext_e, K_ee)
+        # w_ext_i = sorted_block_assignment(w_ext_i, K_ei)
+
+        # self.E2E.proj.comm.weight = w_ee
+        # self.E2I.proj.comm.weight = w_ei
+        # self.I2E.proj.comm.weight = w_ie
+        # self.I2I.proj.comm.weight = w_ii
+        # self.ext2E.proj.comm.weight = w_ext_e
+        # self.ext2I.proj.comm.weight = w_ext_i
 
     def reinit_nu(self, nu):
         self.nu = nu
@@ -387,26 +379,20 @@ class Dewdrop(bp.Network):
                 "indices": self.ext2I.proj.comm.indices,
                 "indptr": self.ext2I.proj.comm.indptr,
             },
-            "N_e": self.N_e,
-            "N_i": self.N_i,
         }
 
     def get_input_params(self):
         keys = [
-            "rho",
-            "dx",
-            "sigma_ee",
-            "sigma_ei",
-            "sigma_ie",
-            "sigma_ii",
-            "boundary",
-            "include_self",
+            "N_e",
+            "omega_ee",
+            "omega_ei",
+            "omega_ie",
+            "omega_ii",
             "gamma",
             "delta",
             "nu",
             "n_ext",
             "J_e",
-            "kernel",
             "method",
             "key",
         ]
@@ -416,52 +402,36 @@ class Dewdrop(bp.Network):
             raise ValueError("Missing parameters: {}".format(missings))
         return _params
 
-    def expected_indegree(self, pop="ee", approx=True):
+    def expected_indegree(self, pop="ee"):
         """
-        Compute the mean indegree.
-        Should converge to `2 * np.pi * sigma**2 * p_max * rho` in the limit of large
-        dx/small sigma.
+        Calculate the expected in-degree for a given population.
         """
-        assert self.boundary == "periodic"
-        dx = self.dx
-        if pop[0] == "e":
-            rho = self.rho
-        else:
-            rho = self.rho / self.gamma
         if pop == "ee":
-            p_max = self.p_ee
-            sigma = self.sigma_ee
+            # Subtract 1 if self-connections are excluded
+            return self.N_e * self.omega_ee
         elif pop == "ei":
-            p_max = self.p_ei
-            sigma = self.sigma_ei
+            return self.N_e * self.omega_ei
         elif pop == "ie":
-            p_max = self.p_ie
-            sigma = self.sigma_ie
+            return self.N_i * self.omega_ie
         elif pop == "ii":
-            p_max = self.p_ii
-            sigma = self.sigma_ii
-
-        if approx:
-            result = 2 * np.pi * sigma**2 * p_max
+            return self.N_i * self.omega_ii
         else:
+            raise ValueError(f"Unknown population connection type: {pop}")
 
-            def integrand(y, x, dx, sigma, p_max):
-                # y is integrated first, x second (dblquad's calling convention).
-                rx = min(x, dx - x)
-                ry = min(y, dx - y)
-                r2 = rx * rx + ry * ry
-                return p_max * np.exp(-r2 / (2.0 * sigma * sigma))
-
-            result, error_est = dblquad(
-                integrand,
-                0,
-                dx,  # outer integral range for x
-                lambda x: 0,  # lower limit for y
-                lambda x: dx,  # upper limit for y
-                args=(dx, sigma, p_max),
-            )
-
-        return rho * result
+    def required_omega(self, pop):
+        """
+        Calculate the expected in-degree for a given population.
+        """
+        if pop == "ee":
+            return self.K_ee / self.N_e
+        elif pop == "ei":
+            return self.K_ei / self.N_e
+        elif pop == "ie":
+            return self.K_ie / self.N_i
+        elif pop == "ii":
+            return self.K_ii / self.N_i
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
 
     def calculate_zeta(self):
         """
@@ -478,13 +448,10 @@ class Dewdrop(bp.Network):
 
         assert len(mats[2][0]) == len(weights[2])
 
-        Ne = np.prod(self.E.size)
-        Ni = np.prod(self.I.size)
-
-        w_E2E = np.bincount(mats[0][1], weights=weights[0], minlength=Ne)
-        w_E2I = np.bincount(mats[1][1], weights=weights[1], minlength=Ni)
-        w_I2E = np.bincount(mats[2][1], weights=weights[2], minlength=Ne)
-        w_I2I = np.bincount(mats[3][1], weights=weights[3], minlength=Ni)
+        w_E2E = np.bincount(mats[0][1], weights=weights[0], minlength=self.N_e)
+        w_E2I = np.bincount(mats[1][1], weights=weights[1], minlength=self.N_i)
+        w_I2E = np.bincount(mats[2][1], weights=weights[2], minlength=self.N_e)
+        w_I2I = np.bincount(mats[3][1], weights=weights[3], minlength=self.N_i)
 
         IE_e = np.mean(w_I2E) / np.mean(w_E2E)
         IE_i = np.mean(w_I2I) / np.mean(w_E2I)
@@ -495,22 +462,93 @@ class Dewdrop(bp.Network):
         Calculate the effective IE ratio for inhibitory and excitatory populations.
         The ratio represents total inhibitory strength divided by
         total excitatory strength (for the average neuron) per neuron type.
+        See also `calculate_zeta`.
         """
-        # * An approximation to the distance kernel that is not valid with periodic
-        # * boundaries when the kernel is too wide
-        zeta_e = (
-            self.delta
-            * (self.sigma_ie**2 * self.p_ie)
-            / (self.gamma * self.sigma_ee**2 * self.p_ee)
-        )
+        # For excitatory neurons: (N_i/gamma * omega_ie * J_i) / (N_e * omega_ee * J_e)
+        # Since J_i = J_e * delta and N_i = N_e / gamma:
+        IE_e = (self.omega_ie * self.delta) / (self.gamma * self.omega_ee)
 
-        zeta_i = (
-            self.delta
-            * (self.sigma_ii**2 * self.p_ii)
-            / (self.gamma * self.sigma_ei**2 * self.p_ei)
-        )
+        # For inhibitory neurons: (N_i/gamma * omega_ii * J_i) / (N_e * omega_ei * J_e)
+        # Similar simplification:
+        IE_i = (self.omega_ii * self.delta) / (self.gamma * self.omega_ei)
 
-        return zeta_e, zeta_i
+        return IE_e, IE_i
+
+    def expected_sum_of_weights(self, pop="ee"):
+        if pop == "ee":
+            j = self.J_ee
+        elif pop == "ei":
+            j = self.J_ei
+        elif pop == "ie":
+            j = self.J_ee * self.delta
+        elif pop == "ii":
+            j = self.J_ei * self.delta
+        else:
+            raise ValueError(f"Unknown population connection type: {pop}")
+        return j * self.expected_indegree(pop)
+
+    # def nu_next_thresh(self):  # !!! WROOOOONG
+    #     """
+    #     Calculate the minimum threshold for the product nu*n_ext to achieve spontaneous
+    #     firing of external and inhibitory populations
+    #     """
+    #     thr_e = self.E.g_L * (self.E.V_th - self.E.V_L) / self.J_e
+    #     thr_i = self.I.g_L * (self.I.V_th - self.I.V_L) / self.J_e
+    #     return thr_e, thr_i
+
+    def linear_subthreshold_equilibrium(self):
+        Ve = self.n_ext * self.nu * self.J_e / self.E.g_L
+        Vi = self.n_ext * self.nu * self.J_e / self.I.g_L
+
+        return Ve, Vi
+
+    def subthreshold_equilibrium_potential(self, alpha_e=0.4202, alpha_i=0.4507):
+        """
+        Calculate the mean voltage for a given population due solely to background input.
+        Corrected by filter_factor which you shoudl estimate from the subthreshold transfer function.
+        """
+        Ve, Vi = self.linear_subthreshold_equilibrium()
+        Ve = self.E.V_L + Ve * alpha_e
+        Vi = self.I.V_L + Vi * alpha_i
+
+        return Ve, Vi
+
+    def estimate_filter_factor(
+        self, nu_n_ext=range(50, 450, 10), num_parallel=32
+    ):  # E.g. pop = self.I
+        # Estimate the filter factor for the steady-state membrane potential by simulating
+        # many instances of a single neuron
+        def run(nu_n_ext):
+            nu = nu_n_ext / self.n_ext
+            disconnect = DisconnectedFNS(
+                N_e=self.N_e,
+                gamma=self.gamma,
+                delta=self.delta,
+                nu=nu,
+                n_ext=self.n_ext,
+                J_e=self.J_e,
+                method=self.method,
+                key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
+            )
+            duration = 1000.0
+            monitors = ["E.V", "I.V"]
+            # Run the simulation
+            runner = bp.DSRunner(
+                disconnect, monitors=monitors, numpy_mon_after_run=False
+            )
+            runner.run(duration=duration)
+            Ve = runner.mon["E.V"].view()
+            Vi = runner.mon["I.V"].view()
+            out = {
+                "E": {"mean": bp.math.mean(Ve), "std": bp.math.std(Ve)},
+                "I": {"mean": bp.math.mean(Vi), "std": bp.math.std(Vi)},
+            }
+            return out
+
+        res = bp.running.jax_vectorize_map(
+            run, [nu_n_ext], num_parallel=num_parallel, clear_buffer=True
+        )
+        return res
 
     def copy(self):
         _params = self.get_input_params()
@@ -552,7 +590,6 @@ class Dewdrop(bp.Network):
             return run
 
         key = np.array(self.key)
-        print(key)
         # If gpu available, use vmap
         if jax.lib.xla_bridge.get_backend().platform == "gpu":
             run = copy_run(
@@ -560,7 +597,7 @@ class Dewdrop(bp.Network):
             )
             print("Vectorizing on GPU")
             res = bp.running.jax_vectorize_map(
-                run, [deltas], num_parallel=num_parallel, clear_buffer=False
+                run, [deltas], num_parallel=num_parallel, clear_buffer=True
             )
         else:
             run = copy_run(
@@ -576,28 +613,30 @@ class Dewdrop(bp.Network):
     def to_dict(
         self,
         keys=[
-            "rho",
-            "dx",
-            "sigma_ee",
-            "sigma_ei",
-            "sigma_ie",
-            "sigma_ii",
-            "omega_ee",
-            "omega_ei",
-            "omega_ie",
-            "omega_ii",
-            "p_ee",
-            "p_ei",
-            "p_ie",
-            "p_ii",
-            "boundary",
-            "include_self",
+            "N_e",
             "gamma",
-            "g",
+            "K_ee",
+            "K_ei",
+            "K_ie",
+            "K_ii",
+            "delta",
             "nu",
-            "p_ext",
-            "J_e",
+            "n_ext",
+            "J_ee",
+            "J_ei",
+            "tau_r_e",
+            "tau_r_i",
+            "tau_d_e",
+            "tau_d_i",
+            "V_rev_e",
+            "V_rev_i",
+            "e_delay",
+            "i_delay",
+            "Delta_g_K",
+            "kernel",
             "method",
+            "key",
+            "copy_conn",
         ],
     ):
         out = {

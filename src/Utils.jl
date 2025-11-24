@@ -2,9 +2,10 @@ using Bootstrap
 using Normalization
 using StatsBase
 using Random
+import Accessors: @set
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts, timebins, unitarylfp, to_ms
+       structurefunction, histcounts, timebins, unitarylfp, to_ms, to_mm, pytree2dict
 
 function _preamble()
     quote
@@ -14,14 +15,18 @@ function _preamble()
         using Statistics
         using TimeseriesTools
         using CairoMakie
+        using TimeseriesMakie
         using Foresight
         using LinearAlgebra
         using Distributed
         using Term
+        using MoreMaps
         using SparseArrays
         using MeanSquaredDisplacement
         using Distributions
         using StableDistributions
+        using JLD2
+        using Random
     end
 end
 macro preamble()
@@ -29,10 +34,15 @@ macro preamble()
 end
 @preamble
 
+bpdt() = pyconvert(Float32, brainpy.share["dt"])
+
+plotdir(args...) = projectdir("plots", args...)
+export plotdir
+
 const connector = '&'
 
-const UnivariateSpikeTrain = Base.typeintersect(SpikeTrain, UnivariateTimeSeries)
-const MultivariateSpikeTrain = Base.typeintersect(SpikeTrain, MultivariateTimeSeries)
+const UnivariateSpikeTrain = Base.typeintersect(SpikeTrain, UnivariateTimeseries)
+const MultivariateSpikeTrain = Base.typeintersect(SpikeTrain, MultivariateTimeseries)
 function firingrate(x::UnivariateSpikeTrain)
     λ = sum(x) / duration(x)
     uconvert(unit(eltype(x)) * u"Hz", λ)
@@ -74,13 +84,13 @@ function bootstrapaverage(average, x::AbstractVector{T}; confint = 0.95,
 end
 
 function bootstrapaverage(average, X::AbstractArray; dims = 1, kwargs...)
-    ds = [i == dims ? 1 : Colon() for i in 1:ndims(X)]
+    ds = [i ∈ dims ? 1 : Colon() for i in 1:ndims(X)]
     μ = similar(X[ds...])
     σl = similar(μ)
     σh = similar(μ)
-    negdims = filter(!=(dims), 1:ndims(X)) |> Tuple
+    negdims = filter(!∈(dims), 1:ndims(X)) |> Tuple
     Threads.@threads for (i, x) in collect(enumerate(eachslice(X; dims = negdims)))
-        μ[i], (σl[i], σh[i]) = bootstrapaverage(average, x; kwargs...)
+        μ[i], (σl[i], σh[i]) = bootstrapaverage(average, x[:]; kwargs...)
     end
     return μ, (σl, σh)
 end
@@ -99,10 +109,10 @@ end
 function structurefunction(x::AbstractVector, τ::Int)
     Δ = @views x[(τ + 1):end] - x[1:(end - τ)]
 end
-function structurefunction(x::RegularTimeSeries, τ::Int; kwargs...)
+function structurefunction(x::RegularTimeseries, τ::Int; kwargs...)
     structurefunction(parent(x), τ; kwargs...)
 end
-function structurefunction(x::RegularTimeSeries, τ::AbstractFloat)
+function structurefunction(x::RegularTimeseries, τ::AbstractFloat)
     structurefunction(x, Int(τ ÷ step(x)); kwargs...)
 end
 function structurefunction(x::AbstractArray, τs)
@@ -120,7 +130,7 @@ function histcounts(x, edges)
 end
 
 # * Move to TimeseriesTools
-function timebins(x::RegularTimeSeries, τ::Number)
+function timebins(x::RegularTimeseries, τ::Number)
     un = unit(eltype(times(x)))
     if unit(τ) != un && unit(τ) == NoUnits
         τ = τ * un
@@ -129,7 +139,7 @@ function timebins(x::RegularTimeSeries, τ::Number)
     tbins = [i .. i + τ for i in tbins]
     x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
 end
-function TimeseriesTools.coarsegrain(x::RegularTimeSeries, τ::Number)
+function TimeseriesTools.coarsegrain(x::RegularTimeseries, τ::Number)
     negdims = setdiff(1:ndims(x), dimnum(x, 𝑡))
     x = timebins(x, τ)
     x = eachslice.(x; dims = negdims |> Tuple) |> stack
@@ -166,6 +176,8 @@ TimeseriesTools.coarsegrain(x::UnivariateRegular, τ::Number) = timebins(x, τ)
 
 to_ms(x::Real) = x * u"ms" # Assume ms already
 to_ms(x::Quantity) = uconvert(u"ms", x)
+to_mm(x::Real) = x * u"mm" # Assume mm already
+to_mm(x::Quantity) = uconvert(u"mm", x)
 
 function check_inputs(times, spikes, spike_type)
     if !(spike_type in [:E, :I])
@@ -224,5 +236,73 @@ function unitarylfp(times, spikes, spike_type;
     exp_mat = @. exp(-time_mat^2 / τ)
     weighted = amps .* exp_mat
     x = vec(sum(weighted, dims = 1))
-    return TimeseriesTools.TimeSeries(times .* u"ms", x)
+    return TimeseriesTools.Timeseries(x, times * u"ms")
+end
+
+# * Working with 'pytrees'
+function pytree2dict(d::Dict)
+    d = deepcopy(d)
+    for (k, v) in d
+        if k isa Py
+            _k = pyconvert(String, k)
+            delete!(d, k)
+            k = _k
+        end
+        k = Symbol(k)
+        if v isa Dict
+            d[k] = pytree2dict(v)
+        elseif string(pytype(v)) == "<class 'dict'>"
+            d[k] = pytree2dict(Dict{Any, Any}(PyDict(v)))
+        elseif string(pytype(v)) == "<class 'tuple'>"
+            d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'numpy.ndarray'>"
+            d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'list'>"
+            d[k] = pyconvert(Array, v)
+        elseif string(pytype(v)) == "<class 'float'>"
+            d[k] = pyconvert(Float32, v)
+        elseif string(pytype(v)) == "<class 'int'>"
+            d[k] = pyconvert(Int32, v)
+        elseif string(pytype(v)) == "<class 'str'>"
+            d[k] = pyconvert(String, v)
+        elseif string(pytype(v)) == "<class 'NULL'>"
+            d[k] = nothing
+        else
+            @warn "Unknown type $k=>$(pytype(v)), converting to string"
+            d[k] = "$v"
+        end
+    end
+    return d
+end
+function pytree2dict(d::Py; kwargs...)
+    d = Dict{Any, Any}(PyDict(d))
+    return pytree2dict(d; kwargs...)
+end
+function defaults(model_class::Py; kwargs...)
+    name = model_class.__name__
+    m = model_class()
+    d = Dict{Any, Any}(PyDict(m.to_dict()))
+    d = d[name]
+    pytree2dict(d; kwargs...)
+end
+
+function group_dt(x::T, dt) where {T}
+    round(x / dt) * dt
+end
+function compute_rates(spikes::SpikeTrain, dt)
+    rates = groupby(spikes, 𝑡 => Base.Fix2(group_dt, dt))
+    rates = map(rates) do r
+        dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
+    end |> stack
+    rates = permutedims(rates, (𝑡, Neuron))
+    rates = rectify(rates, dims = 𝑡)
+end
+
+function log10spectrum(x::AbstractSpectrum)
+    fs = map(log10, lookup(x, 𝑓))
+    set(map(log10, x), 𝑓 => Log10𝑓(fs))
+end
+
+function convert2(u::Unitful.Units, x::AbstractRange)
+    uconvert(u, first(x)):uconvert(u, step(x)):uconvert(u, last(x))
 end

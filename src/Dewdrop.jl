@@ -4,6 +4,7 @@ using DrWatson
 # using cuDNN
 using Libdl
 using PythonCall
+using CondaPkg
 import PythonCall: pycopy!
 
 export convert2, jax_device
@@ -18,23 +19,25 @@ begin # * Python imports
     const models = PythonCall.pynew()
     const running = PythonCall.pynew()
     const utils = PythonCall.pynew()
+    const stats = PythonCall.pynew()
     const distances = PythonCall.pynew()
     const jax = PythonCall.pynew()
     const jax_lib = PythonCall.pynew()
     const xla_bridge = PythonCall.pynew()
     const numpy = PythonCall.pynew()
     const gc = PythonCall.pynew()
-
-    export brainpy, neurons, positions, synapses, models, running, utils, distances, numpy,
-           jax
 end
 
 function __init__()
-    push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/"))
-    dlopen("libcudnn")
+    if CondaPkg.backend() === :MicroMamba
+        push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/")) # ! must use MicroMamba backend
+        dlopen("libcudnn")
+    else
+        throw(error("Dewdrop.jl requires the MicroMamba backend for CondaPkg.jl. Set this using Preferences or an environment variable."))
+    end
 
     pycopy!(sys, pyimport("sys"))
-    sys.path.append(pwd())
+    sys.path.insert(0, dirname(@__DIR__))
 
     pycopy!(os, pyimport("os"))
     # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false" # For clusters/multiprocessing
@@ -49,6 +52,7 @@ function __init__()
     pycopy!(models, pyimport("src.models"))
     pycopy!(running, pyimport("src.running"))
     pycopy!(utils, pyimport("src.utils"))
+    pycopy!(stats, pyimport("src.stats"))
     pycopy!(distances, pyimport("src.distances"))
     pycopy!(numpy, pyimport("numpy"))
     pycopy!(gc, pyimport("gc"))
@@ -93,5 +97,6 @@ end
 
 include("ModelInterface.jl")
 include("Utils.jl")
+include("Plots.jl")
 
 end # module
