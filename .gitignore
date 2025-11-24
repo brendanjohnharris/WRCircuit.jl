@@ -7,6 +7,8 @@
 *.mat
 *.mp4
 *.png
+*.pdf
+*.svg
 *.parquet
 .CondaPkg/
 .CondaPkg copy/

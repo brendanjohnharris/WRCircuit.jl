@@ -34,6 +34,8 @@ macro preamble()
 end
 @preamble
 
+bpdt() = pyconvert(Float32, brainpy.share["dt"])
+
 plotdir(args...) = projectdir("plots", args...)
 export plotdir
 

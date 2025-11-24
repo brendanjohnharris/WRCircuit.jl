@@ -68,7 +68,7 @@ class Spatial(bp.Network):
         V_rev_i=-80.0,  # Makes the inhibitory synapses inhibitory
         e_delay=1.5,  # Synaptic delay. Shencong uses uniform dist. between 0.5 and 2.5
         i_delay=1.5,
-        Delta_g_K=0.003,  # Adaptation strength for excitatory neurons
+        Delta_g_K=0.002,  # Adaptation strength for excitatory neurons
         tau_K=40.0,
         kernel=ExponentialKernel,
         method="exp_auto",

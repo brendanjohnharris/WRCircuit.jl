@@ -35,10 +35,13 @@ begin # * Fixed parameters
 end
 
 begin # And format parameters
-    delta = Dim{:delta}(range(2, 5, length = 32))
+    delta = Dim{:delta}(range(3, 5, length = 32))
     obs = Obs(1:1)
 end
 begin
+    if !isdir(path)
+        mkpath(path)
+    end
     exists = parse_savename.(readdir(path); connector = string(connector))
     exists = getindex.(exists, 2)
     exists = getindex.(exists, "delta")
@@ -72,7 +75,7 @@ begin# * Run simulation
                 x = x .- mean(x, dims = 𝑡) # Remove DC offset
                 # * MAD of inputs
                 τs = logrange(10, 1u"s" / uconvert(u"s", dt), length = 100)
-                τs = round.(Int, τs) |> unique
+                τs = unique(round.(Int, τs)) .* dt
                 mad = map(eachslice(x, dims = Neuron)) do _x
                     madev(_x, τs)
                 end |> stack

@@ -475,10 +475,14 @@ class Nonspatial(bp.Network):
         return IE_e, IE_i
 
     def expected_sum_of_weights(self, pop="ee"):
-        if pop == "ee" or pop == "ei":
-            j = self.J_e
-        elif pop == "ie" or pop == "ii":
-            j = self.J_e * self.delta
+        if pop == "ee":
+            j = self.J_ee
+        elif pop == "ei":
+            j = self.J_ei
+        elif pop == "ie":
+            j = self.J_ee * self.delta
+        elif pop == "ii":
+            j = self.J_ei * self.delta
         else:
             raise ValueError(f"Unknown population connection type: {pop}")
         return j * self.expected_indegree(pop)
