@@ -5,11 +5,11 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using DataInterpolations
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Load manifest
@@ -39,7 +39,7 @@ begin # * Loop through files and plot
         title = parameters[[:K_ee, :K_ei, :K_ie, :K_ii, :nu, :J_ei]]
         title = map(keys(title), values(title)) do k, v
                     k => round(v, sigdigits = 3)
-                end |> NamedTuple |> Dewdrop.sortparams |> string
+                end |> NamedTuple |> WorkingRegime.sortparams |> string
 
         spikes = load(datadir("spatial_sampling", file), "monitor")["E.spike"]
 
@@ -49,10 +49,10 @@ begin # * Loop through files and plot
                 @info "Animation for $hash already exists"
             else
                 dx = parameters[:dx]
-                rates = Dewdrop.compute_rates(spikes, 50u"ms")
-                Dewdrop.animate_rates(rates, dx;
-                                      filename = animation_file,
-                                      axis = (; title, titlesize = 12))
+                rates = WorkingRegime.compute_rates(spikes, 50u"ms")
+                WorkingRegime.animate_rates(rates, dx;
+                                            filename = animation_file,
+                                            axis = (; title, titlesize = 12))
             end
 
             # * Now do MUA spectrum from local patch
@@ -64,7 +64,7 @@ begin # * Loop through files and plot
                 dx = parameters[:dx]
                 rho = parameters[:rho]
                 dn = round(Int, sqrt(rho * dx^2))
-                positions = Dewdrop.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
+                positions = WorkingRegime.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
                 positions = map(positions) do pos
                     map(pos) do p
                         p.tolist() |> convert2(Float32)
@@ -80,7 +80,7 @@ begin # * Loop through files and plot
                 end
                 local_idxs = findall(mask)
 
-                mua = Dewdrop.compute_rates(spikes[:, local_idxs], 2u"ms")
+                mua = WorkingRegime.compute_rates(spikes[:, local_idxs], 2u"ms")
                 mua = mean(mua, dims = Neuron)
                 mua = dropdims(mua, dims = Neuron)
                 mua = Float64.(mua)

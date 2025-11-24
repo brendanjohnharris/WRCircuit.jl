@@ -1,5 +1,5 @@
 #### python
-# filepath: /home/brendan/OneDrive/Masters/Code/Vortices/Julia/Dewdrop.jl/scripts/sbi_network_frequency_jax.py
+# filepath: /home/brendan/OneDrive/Masters/Code/Vortices/Julia/WorkingRegime.jl/scripts/sbi_network_frequency_jax.py
 import os
 import sys
 import numpy as np

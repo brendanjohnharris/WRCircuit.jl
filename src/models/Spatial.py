@@ -73,7 +73,7 @@ class Spatial(bp.Network):
         kernel=ExponentialKernel,
         method="exp_auto",
         key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
-        copy_conn=False,  # Whether to copy connectivity from the provided Dewdrop
+        copy_conn=False,  # Whether to copy connectivity from the provided WorkingRegime
     ):
         super().__init__()
 

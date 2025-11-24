@@ -5,12 +5,12 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Choose example delta

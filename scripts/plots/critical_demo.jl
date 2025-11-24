@@ -5,16 +5,16 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = Dewdrop.models.Spatial
+    model = WorkingRegime.models.Spatial
     begin # FNS parameters
         rho = 20000
         dx = 0.5
@@ -60,11 +60,11 @@ begin
                     nu,
                     n_ext,
                     Delta_g_K,
-                    key = Dewdrop.PRNGKey(52))
+                    key = WorkingRegime.PRNGKey(52))
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
-    # stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-    #                   "susceptibility" => Dewdrop.stats.susceptibility(bin = 10))
+    # stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
+    #                   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10))
 end
 
 begin # * Run simulation
@@ -75,8 +75,8 @@ end
 
 begin # * Animate
     spikes = x[Population = At(:E), Var = At(:spike)]
-    rates = Dewdrop.compute_rates(spikes, 50u"ms")
-    Dewdrop.animate_rates(rates, dx; filename = "critical_demo.mp4")
+    rates = WorkingRegime.compute_rates(spikes, 50u"ms")
+    WorkingRegime.animate_rates(rates, dx; filename = "critical_demo.mp4")
 end
 
 if :I ∈ lookup(x, Population)  # * Spike raster
@@ -145,7 +145,7 @@ if :I ∈ lookup(x, Population)  # * Spike raster
 end
 
 begin # * Fano factor
-    dt = Dewdrop.bpdt()
+    dt = WorkingRegime.bpdt()
     τs = logrange(dt * 10, 0.1 * uconvert(u"ms", tmax - tmin) |> ustrip, length = 200)
     fano = fano_factor(ustripall(spikes), τs)
     # fano = fano[𝑡 = 1..1000]
@@ -220,7 +220,7 @@ end
 #     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 100]
 #     # s = _s[2:end, 2000] |> ustripall
 
-#     ls = Dewdrop.log10spectrum(s)
+#     ls = WorkingRegime.log10spectrum(s)
 #     params = fit_oneoneff(ls; n_peaks = 2, w = 10)
 #     params = fit_oneoneff(ls, params)
 
@@ -285,7 +285,7 @@ end
 
 # begin # * MUA spectrum
 #     mdt = 2.0u"ms"
-#     mua = groupby(spikes, 𝑡 => Base.Fix2(Dewdrop.group_dt, mdt))
+#     mua = groupby(spikes, 𝑡 => Base.Fix2(WorkingRegime.group_dt, mdt))
 #     mua = map(mua) do r
 #         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
 #     end |> stack

@@ -5,11 +5,11 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using DataInterpolations
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Load manifest
@@ -38,7 +38,7 @@ begin # * Loop through files and plot
         title = parameters[[:K_ee, :K_ei, :K_ie, :K_ii, :nu, :J_ei, :Delta_g_K]]
         title = map(keys(title), values(title)) do k, v
                     k => round(v, sigdigits = 3)
-                end |> NamedTuple |> Dewdrop.sortparams |> string
+                end |> NamedTuple |> WorkingRegime.sortparams |> string
 
         spikes = load(datadir("nonspatial_sampling", file), "monitor")["E.spike"]
 
@@ -49,7 +49,7 @@ begin # * Loop through files and plot
                 @info "MUA spectrum for $hash already exists"
             else
                 # * MUA over whole population
-                mua = Dewdrop.compute_rates(spikes, 2u"ms")
+                mua = WorkingRegime.compute_rates(spikes, 2u"ms")
                 mua = mean(mua, dims = Neuron)
                 mua = dropdims(mua, dims = Neuron)
                 mua = Float64.(mua)

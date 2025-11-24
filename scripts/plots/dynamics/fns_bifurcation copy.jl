@@ -3,18 +3,18 @@
 #=
 exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-ENV["DEWDROP_BACKEND"] = "cpu"
+ENV["WorkingRegime_BACKEND"] = "cpu"
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 brainpy.math.set_platform("cpu")
 
 begin
-    model = models.Dewdrop
-    modelname = "Dewdrop"
+    model = models.WorkingRegime
+    modelname = "WorkingRegime"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -93,29 +93,29 @@ transient = 5000u"ms"
 
 begin
     addprocs(3)
-    @everywhere ENV["DEWDROP_BACKEND"] = "cpu"
-    @everywhere using Dewdrop
+    @everywhere ENV["WorkingRegime_BACKEND"] = "cpu"
+    @everywhere using WorkingRegime
     @everywhere using JLD2
-    @everywhere Dewdrop.@preamble
+    @everywhere WorkingRegime.@preamble
 end
 begin
     # conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
 
     out = pmap(deltas) do delta # Maybe have to clear live arrays for each worker?
         @info "δ = $delta"
-        m̂ = models.Dewdrop(rho = rho, dx = dx, J_e = J_e,
-                            nu = 120, n_ext = 25,
-                            delta = delta,
-                            p_ee = p_ee,
-                            p_ei = p_ei,
-                            p_ie = p_ie,
-                            p_ii = p_ii,
-                            sigma_ee = sigma_ee,
-                            sigma_ei = sigma_ei,
-                            sigma_ie = sigma_ie,
-                            sigma_ii = sigma_ii,
-                            kernel = kernel,
-                            key = jax.random.PRNGKey(42))
+        m̂ = models.WorkingRegime(rho = rho, dx = dx, J_e = J_e,
+                                  nu = 120, n_ext = 25,
+                                  delta = delta,
+                                  p_ee = p_ee,
+                                  p_ei = p_ei,
+                                  p_ie = p_ie,
+                                  p_ii = p_ii,
+                                  sigma_ee = sigma_ee,
+                                  sigma_ei = sigma_ei,
+                                  sigma_ie = sigma_ie,
+                                  sigma_ii = sigma_ii,
+                                  kernel = kernel,
+                                  key = jax.random.PRNGKey(42))
         res = bpsolve(m̂, T; populations = [:E], vars = [:spike], transient)
         spikes = res[Var = At(:spike)][Population = At(:E)]
         begin # * Susceptibility
@@ -131,7 +131,7 @@ begin
             λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
             λ = uconvert.(u"Hz", mean(λ))
         end
-        Dewdrop.clear_live_arrays() # Does this operate @everywhere?
+        WorkingRegime.clear_live_arrays() # Does this operate @everywhere?
         return χ, λ
     end
 end

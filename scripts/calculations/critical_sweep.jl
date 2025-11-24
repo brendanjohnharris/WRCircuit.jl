@@ -5,12 +5,12 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
 using Random
 using SparseArrays
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Sampling parameters
@@ -19,8 +19,8 @@ begin # * Sampling parameters
 end
 
 begin # * Fixed parameters
-    model = Dewdrop.models.Spatial
-    default_params = Dewdrop.defaults(model)
+    model = WorkingRegime.models.Spatial
+    default_params = WorkingRegime.defaults(model)
 
     tmax = 35u"s"
     transient = 5u"s" # The transient. Simulations always begin at 0
@@ -28,9 +28,9 @@ begin # * Fixed parameters
     rho = default_params[:parameters][:rho]
 
     monitors = ["E.spike", "E.input"] |> pytuple
-    stat_funcs = Dict("monitor" => Dewdrop.stats.monitor)
+    stat_funcs = Dict("monitor" => WorkingRegime.stats.monitor)
 
-    dt = pyconvert(Float32, Dewdrop.brainpy.share["dt"]) * u"ms"
+    dt = pyconvert(Float32, WorkingRegime.brainpy.share["dt"]) * u"ms"
     metadata = (; tmax, transient, monitors, dt)
 end
 
@@ -55,13 +55,13 @@ begin# * Run simulation
     for (i, delta) in enumerate(batches)
         @info "Batch $i / $(length(batches))"
         keys = rand(UInt32, length(delta))
-        jax_keys = Dewdrop.jax.numpy.stack([Dewdrop.PRNGKey(k) for k in keys]) # ? Important, must be python array
+        jax_keys = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(k) for k in keys]) # ? Important, must be python array
         params = (; delta, key = jax_keys)
 
-        runner = Dewdrop.create_run(model; monitors, tmax, transient)
-        stats_run = Dewdrop.create_stats_run(runner, stat_funcs)
-        stats, sweep_parameters = Dewdrop.partial_vmap(stats_run)(params)
-        res = Dewdrop.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
+        runner = WorkingRegime.create_run(model; monitors, tmax, transient)
+        stats_run = WorkingRegime.create_stats_run(runner, stat_funcs)
+        stats, sweep_parameters = WorkingRegime.partial_vmap(stats_run)(params)
+        res = WorkingRegime.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
 
         for i in eachindex(delta)
             d = params[:delta][i]

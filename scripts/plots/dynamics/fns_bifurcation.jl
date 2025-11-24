@@ -7,9 +7,9 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --startup-file=no --color=yes "$
 # $HOME/build/julia-1.11.2/bin/julia maybe
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
@@ -39,7 +39,7 @@ end
 begin # * Generate a bifurcation diagram over deltas and o-scale
     stats = map(omicrons) do omicron
         @info "Simulating for omicron = $omicron"
-        Dewdrop.clear_live_arrays()
+        WorkingRegime.clear_live_arrays()
         begin
             omega_ee, omega_ie, omega_ei, omega_ii = omega .* omicron
             m = model(; parameters..., omega_ee, omega_ie, omega_ei, omega_ii,
@@ -85,7 +85,7 @@ begin # * Generate a bifurcation diagram over deltas and o-scale
             #     f_max = findmax(s) |> last
             #     f_max = freqs(s)[f_max]
             # end
-            # Dewdrop.clear_live_arrays() # Does this operate @everywhere? Seems not
+            # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
             return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end

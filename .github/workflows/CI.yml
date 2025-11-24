@@ -76,6 +76,6 @@ jobs:
         shell: julia --project=docs --color=yes {0}
         run: |
           using Documenter: DocMeta, doctest
-          using Dewdrop
-          DocMeta.setdocmeta!(Dewdrop, :DocTestSetup, :(using Dewdrop); recursive=true)
-          doctest(Dewdrop)
+          using WorkingRegime
+          DocMeta.setdocmeta!(WorkingRegime, :DocTestSetup, :(using WorkingRegime); recursive=true)
+          doctest(WorkingRegime)

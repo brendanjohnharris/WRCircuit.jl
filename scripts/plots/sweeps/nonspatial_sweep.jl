@@ -5,13 +5,13 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = Dewdrop.models.Nonspatial
+    model = WorkingRegime.models.Nonspatial
     begin
         N_e = 2000
         J_e = 0.0008 # Microsiemens
@@ -32,12 +32,12 @@ begin
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
 
     monitors = ("E.spike",)#, "E.V", "E.input")
-    stat_funcs = Dict("rate" => Dewdrop.stats.firing_rate,
-                      "susceptibility" => Dewdrop.stats.susceptibility(bin = 10),
-                      "spike_spectrum" => Dewdrop.stats.spike_spectrum(n_segments = 10),
-                      #   "temporal_average" => Dewdrop.stats.temporal_average,
-                      #   "grand_distribution" => Dewdrop.stats.grand_distribution(n_bins = 1000),
-                      "mua" => Dewdrop.stats.mua(bin = ustrip(to_ms(mua_dt))))
+    stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
+                      "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
+                      "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => WorkingRegime.stats.temporal_average,
+                      #   "grand_distribution" => WorkingRegime.stats.grand_distribution(n_bins = 1000),
+                      "mua" => WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt))))
 
     metadata = (; mua_dt, tmax, tmin, monitors)
 end
@@ -47,19 +47,19 @@ begin# * Generate dict of parameter vectors
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
     sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
     n_iters = length(first(values(sweep_params)))
-    jax_keys = Dewdrop.jax.random.split(Dewdrop.jax.random.PRNGKey(42), n_iters)
-    sweep_params["key"] = Dewdrop.numpy.array.(jax_keys) # * So that each run is independent
+    jax_keys = WorkingRegime.jax.random.split(WorkingRegime.jax.random.PRNGKey(42), n_iters)
+    sweep_params["key"] = WorkingRegime.numpy.array.(jax_keys) # * So that each run is independent
 end
 begin # * Create sweep function
-    run = Dewdrop.stats.create_run(model, pydict(fixed_params), monitors,
-                                   ustrip(to_ms(tmax)),
-                                   ustrip(to_ms(tmin)))
-    stats_run = Dewdrop.stats.create_stats_run(run, pydict(stat_funcs))
+    run = WorkingRegime.stats.create_run(model, pydict(fixed_params), monitors,
+                                         ustrip(to_ms(tmax)),
+                                         ustrip(to_ms(tmin)))
+    stats_run = WorkingRegime.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = Dewdrop.stats.progress_vmap(stats_run, batch_size = 10)(pydict(sweep_params))
+    stats, sweep_parameters = WorkingRegime.stats.progress_vmap(stats_run, batch_size = 10)(pydict(sweep_params))
 end
 begin
-    Dewdrop.stats.save("nonspatial_sweep.pickle",
-                       (stats, sweep_params, fixed_params, metadata))
+    WorkingRegime.stats.save("nonspatial_sweep.pickle",
+                             (stats, sweep_params, fixed_params, metadata))
 end

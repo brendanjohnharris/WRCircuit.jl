@@ -7,7 +7,7 @@ exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 DrWatson.@quickactivate
 using PythonCall
-using Dewdrop
+using WorkingRegime
 using Unitful
 using Statistics
 using TimeseriesTools
@@ -52,7 +52,7 @@ if haskey(ENV, "JULIA_DISTRIBUTED") && length(procs()) == 1 # ? You should start
     ourprocs = USydClusters.Physics.addprocs(1; mem = 32, ncpus = 32,
                                              project = projectdir(), qsub_flags = `-q l40s`)
     @everywhere using DrWatson
-    @everywhere using Dewdrop
+    @everywhere using WorkingRegime
     @everywhere using PythonCall
     @everywhere using Statistics
     @everywhere using TimeseriesTools
@@ -63,7 +63,7 @@ end
 begin
     folder = datadir(modelname, "bifurcation_diagram")
     pmap(params) do param
-        Dewdrop.clear_live_arrays()
+        WorkingRegime.clear_live_arrays()
         @unpack g, ν̂ = param
         m = model(N; g = g, nu_hat = ν̂)
         x = bpsolve(m, T; populations = [:E, :I], vars = [:spike, :V])
@@ -91,7 +91,7 @@ end
 #             using DrWatson
 #             ENV["JULIA_CONDAPKG_BACKEND"] = "Null" # To make loading faster
 #             ENV["JULIA_PYTHONCALL_EXE"] = projectdir(".CondaPkg", "env", "bin", "python")
-#             using Dewdrop
+#             using WorkingRegime
 
 #             model = models.balanced.FNSPopulations
 #             m = model($N; g = $g, nu_hat = $ν̂)

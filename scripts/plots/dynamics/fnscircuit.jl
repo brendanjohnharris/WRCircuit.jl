@@ -6,12 +6,12 @@ exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
-Dewdrop.@preamble
+using WorkingRegime
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 begin
-    model = models.Dewdrop
-    modelname = "Dewdrop"
+    model = models.WorkingRegime
+    modelname = "WorkingRegime"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -49,12 +49,12 @@ begin
 end
 begin
     T = 5000.0
-    # cue = Dewdrop.numpy.array(m.E.V) |> convert2(Vector)
+    # cue = WorkingRegime.numpy.array(m.E.V) |> convert2(Vector)
     # Cue = reshape(cue, convert2(Vector)(m.E.size)...)
     # Cue[:] .= 0.0
     # Cue[1:4, 1:4] .= 0.5 # Cue the bottom corner
     # cue = cue)
-    # cue = repeat(cue, 1, Int(T÷convert2(Float32)(Dewdrop.brainpy.share["dt"])))
+    # cue = repeat(cue, 1, Int(T÷convert2(Float32)(WorkingRegime.brainpy.share["dt"])))
     XX = bpsolve(m, T; populations = [:E], vars = [:spike, :V, :input])#, inputs = [("Ein.input", cue)])
 
     V = XX[Var = At(:V)]

@@ -6,16 +6,16 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --startup-file=no --color=yes "$
 # $HOME/build/julia-1.11.2/bin/julia maybe
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.Dewdrop
-    modelname = "Dewdrop"
+    model = models.WorkingRegime
+    modelname = "WorkingRegime"
 
-    begin # Dewdrop parameters
+    begin # WorkingRegime parameters
         dx = 0.75 # mm
         rho = 30000.0
         kernel = distances.GaussianKernel
@@ -49,7 +49,7 @@ end
 begin
     stats = map(nus) do nu
         @info "Simulating for nu = $nu"
-        Dewdrop.clear_live_arrays()
+        WorkingRegime.clear_live_arrays()
         begin
             m = model(; parameters..., nu, key = jax.random.PRNGKey(42)) # Build once to get connectivity
 
@@ -59,7 +59,7 @@ begin
             xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
 
             conn = m.get_connectivity()
-            conn = models.Dewdrop.pytree_to_numpy(conn) # Freeze the connectivity
+            conn = models.WorkingRegime.pytree_to_numpy(conn) # Freeze the connectivity
             _params = m.get_input_params() |> convert2(Dict{Symbol, Any})
             model_class = m.__class__
 
@@ -90,7 +90,7 @@ begin
                 λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
                 λ = uconvert.(u"Hz", mean(λ))
             end
-            # Dewdrop.clear_live_arrays() # Does this operate @everywhere? Seems not
+            # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
             return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end

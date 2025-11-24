@@ -5,7 +5,7 @@ exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 
 using PythonCall
-using Dewdrop
+using WorkingRegime
 using TimeseriesTools
 
 FNSPopulations = models.balanced.FNSPopulations

@@ -7,7 +7,7 @@ exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 DrWatson.@quickactivate
 using PythonCall
-using Dewdrop
+using WorkingRegime
 using Unitful
 using Statistics
 using TimeseriesTools
@@ -18,7 +18,7 @@ using USydClusters
 using Term
 using SparseArrays
 
-model = Dewdrop.models.balanced.FNSPopulations
+model = WorkingRegime.models.balanced.FNSPopulations
 modelname = "Balanced"
 
 begin # * Fixed parameters
@@ -36,7 +36,7 @@ if false # * Start procs
         using USydClusters
         ourprocs = USydClusters.Physics.addprocs(20; mem = 64, ncpus = 16,
                                                  project = projectdir())
-        @everywhere using Dewdrop
+        @everywhere using WorkingRegime
         @everywhere using PythonCall
         @everywhere using Statistics
         @everywhere using TimeseriesTools
@@ -71,7 +71,7 @@ if false
             using DrWatson
             ENV["JULIA_CONDAPKG_BACKEND"] = "Null" # To make loading faster
             ENV["JULIA_PYTHONCALL_EXE"] = projectdir(".CondaPkg", "env", "bin", "python")
-            using Dewdrop
+            using WorkingRegime
             model = models.balanced.FNSPopulations
             m = model($N; g = $g, nu_hat = $ν̂)
             x = bpsolve(m, $T; populations = [:E], vars = [:spike])
@@ -85,7 +85,7 @@ if false
                                     qsub_flags = "-q l40s")
 end
 function produce(D)
-    Dewdrop.clear_live_arrays() # Scorched earth
+    WorkingRegime.clear_live_arrays() # Scorched earth
     @unpack g, ν̂ = D
     m = model(N; g = g, nu_hat = ν̂)
     x = bpsolve(m, T; populations = [:E, :I], vars = [:spike])

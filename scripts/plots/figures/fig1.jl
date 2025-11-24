@@ -5,12 +5,12 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 # begin # * Plot inputs heatmap
@@ -20,7 +20,7 @@ set_theme!(foresight(:physics))
 #     X = mean(X, dims = 𝑡)
 #     X = dropdims(X, dims = 𝑡)
 #     dx = load(file, "parameters")[:dx]
-#     positions, idxs = Dewdrop.infer_geometry(X, dx)
+#     positions, idxs = WorkingRegime.infer_geometry(X, dx)
 #     N = sqrt(length(X)) |> Int
 #     X = reshape(X, N, N)
 #     heatmap(X;)
@@ -28,7 +28,7 @@ set_theme!(foresight(:physics))
 begin # * Run a sample simulation at the working point (default values)
     tmax = 30u"s" # * Bump up
     tmin = 5u"s"
-    model = Dewdrop.models.Spatial
+    model = WorkingRegime.models.Spatial
 
     m = model(;)
     x = bpsolve(m, tmax;
@@ -39,8 +39,7 @@ end
 
 begin # * Animate
     spikes = x[Population = At(:E), Var = At(:spike)]
-    rates = Dewdrop.compute_rates(spikes, 50u"ms")
-    dx = Dewdrop.defaults(model)[:parameters][:dx]
-    Dewdrop.animate_rates(rates, dx; filename = plotdir("fig1", "animation.mp4"))
+    rates = WorkingRegime.compute_rates(spikes, 50u"ms")
+    dx = WorkingRegime.defaults(model)[:parameters][:dx]
+    WorkingRegime.animate_rates(rates, dx; filename = plotdir("fig1", "animation.mp4"))
 end
-

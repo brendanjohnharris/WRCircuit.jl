@@ -5,14 +5,14 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = Dewdrop.models.Nonspatial
+    model = WorkingRegime.models.Nonspatial
     begin
         N_e = 2000
         nu = 10.0
@@ -86,9 +86,9 @@ end
 # end
 
 begin # * MUA spectrum
-    rates = Dewdrop.compute_rates(spikes, 50u"ms")
+    rates = WorkingRegime.compute_rates(spikes, 50u"ms")
     mdt = 3.0u"ms"
-    mua = groupby(spikes, 𝑡 => Base.Fix2(Dewdrop.group_dt, mdt))
+    mua = groupby(spikes, 𝑡 => Base.Fix2(WorkingRegime.group_dt, mdt))
     mua = map(mua) do r
         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
     end |> stack

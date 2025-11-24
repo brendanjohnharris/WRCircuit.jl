@@ -1,4 +1,4 @@
-module Dewdrop
+module WorkingRegime
 using DrWatson
 # using CUDA
 # using cuDNN
@@ -33,7 +33,7 @@ function __init__()
         push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/")) # ! must use MicroMamba backend
         dlopen("libcudnn")
     else
-        throw(error("Dewdrop.jl requires the MicroMamba backend for CondaPkg.jl. Set this using Preferences or an environment variable."))
+        throw(error("WorkingRegime.jl requires the MicroMamba backend for CondaPkg.jl. Set this using Preferences or an environment variable."))
     end
 
     pycopy!(sys, pyimport("sys"))
@@ -57,8 +57,8 @@ function __init__()
     pycopy!(numpy, pyimport("numpy"))
     pycopy!(gc, pyimport("gc"))
 
-    if haskey(ENV, "DEWDROP_BACKEND")
-        backend = ENV["DEWDROP_BACKEND"]
+    if haskey(ENV, "WorkingRegime_BACKEND")
+        backend = ENV["WorkingRegime_BACKEND"]
         if backend == "cpu"
             jax.default_device = jax.devices("cpu")[0]
             jax.config.update("jax_platform_name", "cpu")
@@ -68,7 +68,7 @@ function __init__()
             jax.config.update("jax_platform_name", "gpu")
             brainpy.math.set_platform("gpu")
         else
-            @warn "Unknown Dewdrop.jl backend $backend"
+            @warn "Unknown WorkingRegime.jl backend $backend"
         end
     end
 
@@ -91,7 +91,7 @@ convert2(x::Type) = Base.Fix1(pyconvert, x)
 jax_device() = xla_bridge.get_backend().platform |> convert2(String)
 jax_live_arrays() = xla_bridge.get_backend().live_arrays()
 function clear_live_arrays()
-    [x.delete() for x in Dewdrop.jax_live_arrays()]
+    [x.delete() for x in WorkingRegime.jax_live_arrays()]
     PythonCall.GC.gc()
 end
 

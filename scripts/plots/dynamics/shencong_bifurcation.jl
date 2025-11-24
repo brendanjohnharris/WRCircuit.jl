@@ -6,14 +6,14 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --startup-file=no --color=yes "$
 # $HOME/build/julia-1.11.2/bin/julia maybe
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.Dewdrop
-    modelname = "Dewdrop"
+    model = models.WorkingRegime
+    modelname = "WorkingRegime"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -47,7 +47,7 @@ end
 begin
     stats = map(nus) do nu
         @info "Simulating for nu = $nu"
-        Dewdrop.clear_live_arrays()
+        WorkingRegime.clear_live_arrays()
         m = model(; key = jax.random.PRNGKey(42),
                   parameters..., nu)
         brainpy.reset_state(m)
@@ -82,7 +82,7 @@ begin
                 λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
                 λ = uconvert.(u"Hz", mean(λ))
             end
-            # Dewdrop.clear_live_arrays() # Does this operate @everywhere? Seems not
+            # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
             return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end

@@ -5,9 +5,9 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 #! /bin/bash
 # -*- mode: julia -*-
@@ -16,13 +16,13 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --color=yes "${BASH_SOURCE[0]}" 
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Load stats
-    load_stats, sweep_parameters, fixed_parameters, metadata = Dewdrop.stats.load("nonspatial_sweep.pickle")
+    load_stats, sweep_parameters, fixed_parameters, metadata = WorkingRegime.stats.load("nonspatial_sweep.pickle")
 
     tmax = metadata[:tmax].val |> convert2(Float32)
     tmin = metadata[:tmin].val |> convert2(Float32)

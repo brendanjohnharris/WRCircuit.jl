@@ -5,7 +5,7 @@ exec julia +1.11 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using Dewdrop
+using WorkingRegime
 using JLD2
 using LinearAlgebra
 using Random
@@ -13,7 +13,7 @@ using SparseArrays
 using Optim
 using TimeseriesTools
 using MoreMaps
-Dewdrop.@preamble
+WorkingRegime.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Sampling parameters
@@ -22,15 +22,15 @@ begin # * Sampling parameters
 end
 
 begin # * Fixed parameters
-    model = Dewdrop.models.Spatial
+    model = WorkingRegime.models.Spatial
 
     tmax = 10u"s"
     transient = 2u"s" # The transient. Simulations always begin at 0
 
     monitors = ["E.input", "E.V"] |> pytuple
-    stat_funcs = Dict("monitor" => Dewdrop.stats.monitor)
+    stat_funcs = Dict("monitor" => WorkingRegime.stats.monitor)
 
-    dt = pyconvert(Float32, Dewdrop.brainpy.share["dt"]) * u"ms"
+    dt = pyconvert(Float32, WorkingRegime.brainpy.share["dt"]) * u"ms"
     metadata = (; tmax, transient, monitors, dt)
 
     savepath = datadir("spatial_exponents")
@@ -85,15 +85,15 @@ begin
     for bidxs in batch_idxs
         delta = first.(bidxs)
         repeats = last.(bidxs)
-        key = Dewdrop.jax.numpy.stack([Dewdrop.PRNGKey(i) for i in repeats]) # Important, must be python array
+        key = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(i) for i in repeats]) # Important, must be python array
 
         these_ps = (; delta, key)
 
-        run = Dewdrop.create_run(model; monitors, tmax, transient)
-        stats_run = Dewdrop.create_stats_run(run, stat_funcs)
-        stats, sweep_parameters = Dewdrop.partial_vmap(stats_run; static_argnames)(these_ps)
-        out = Dewdrop.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata,
-                                  delete_key = false)
+        run = WorkingRegime.create_run(model; monitors, tmax, transient)
+        stats_run = WorkingRegime.create_stats_run(run, stat_funcs)
+        stats, sweep_parameters = WorkingRegime.partial_vmap(stats_run; static_argnames)(these_ps)
+        out = WorkingRegime.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata,
+                                        delete_key = false)
         out = out.monitor
 
         for (k, vars) in pairs(out)

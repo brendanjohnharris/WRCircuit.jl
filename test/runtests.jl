@@ -1,4 +1,4 @@
-using Dewdrop
+using WorkingRegime
 using CUDA
 using Test
 
