@@ -42,6 +42,59 @@ class Spatial(bp.Network):
     A spatially embedded network of FNS neurons.
     """
 
+    def _validate_connectivity_parameters(self, ne, ni):
+        """
+        Validate that connectivity parameters K_* are compatible with network size.
+
+        Args:
+            ne: Number of grid points in each dimension (total E neurons = ne^2)
+            ni: Total number of inhibitory neurons
+
+        Raises:
+            ValueError: If any K parameter is too large for the network size
+        """
+        ne_total = ne * ne  # Total excitatory neurons
+
+        # For each connection type, check that requested connections don't exceed maximum possible
+        errors = []
+
+        # E2E: K_ee * ne connections among ne^2 neurons, max = ne^4
+        if self.K_ee * ne > ne_total * ne_total:
+            errors.append(
+                f"K_ee={self.K_ee} is too large for network with ne={ne} ({ne_total} E neurons). "
+                f"Maximum K_ee = {ne_total * ne_total // ne} for this network size."
+            )
+
+        # E2I: K_ei * ni connections from ne^2 E neurons to ni I neurons, max = ne^2 * ni
+        if self.K_ei * ni > ne_total * ni:
+            errors.append(
+                f"K_ei={self.K_ei} is too large for network with ne={ne}, ni={ni}. "
+                f"Maximum K_ei = {ne_total} for this network size."
+            )
+
+        # I2E: K_ie * ne connections from ni I neurons to ne^2 E neurons, max = ni * ne^2
+        if self.K_ie * ne > ni * ne_total:
+            errors.append(
+                f"K_ie={self.K_ie} is too large for network with ne={ne}, ni={ni}. "
+                f"Maximum K_ie = {ni * ne_total // ne} for this network size."
+            )
+
+        # I2I: K_ii * ni connections among ni neurons, max = ni^2
+        if self.K_ii * ni > ni * ni:
+            errors.append(
+                f"K_ii={self.K_ii} is too large for network with ni={ni} I neurons. "
+                f"Maximum K_ii = {ni} for this network size."
+            )
+
+        if errors:
+            error_msg = (
+                "Connectivity parameters incompatible with network size:\n  " +
+                "\n  ".join(errors) +
+                f"\n\nSuggestion: Increase rho (currently {self.rho}) or dx (currently {self.dx}), "
+                f"or reduce the K_* parameters to match your desired network size."
+            )
+            raise ValueError(error_msg)
+
     def __init__(
         self,
         rho=20000,  # Density of Exc. neurons (neurons per mm^2)
@@ -72,7 +125,7 @@ class Spatial(bp.Network):
         tau_K=40.0,
         kernel=ExponentialKernel,
         method="exp_auto",
-        key=jax.random.PRNGKey(np.random.randint(0, 2**32)),
+        key=None,
         copy_conn=False,  # Whether to copy connectivity from the provided WorkingRegime
     ):
         super().__init__()
@@ -93,6 +146,9 @@ class Spatial(bp.Network):
 
         self.method = method
         self.kernel = kernel
+
+        if key is None:
+            key = jax.random.PRNGKey(np.random.randint(0, 2**32))
         self.key = key
 
         self.K_ee = K_ee
@@ -123,6 +179,10 @@ class Spatial(bp.Network):
         A = dx**2
         ne = round(np.sqrt(rho * A))  # Number of grid points in each dimension
         ni = round((ne**2) / gamma)
+
+        # Validate that K values are compatible with network size
+        # Maximum connections occur when every neuron connects to every other neuron
+        self._validate_connectivity_parameters(ne, ni)
 
         # dx bounds the grid, assuming left bottom corner is at (0, 0)
         exc_positions = GridPositions((dx, dx))
@@ -310,6 +370,7 @@ class Spatial(bp.Network):
             mode=None,
             seed=subkey,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2E = Synapse(
             pre=self.ext,
             post=self.E,
@@ -320,6 +381,7 @@ class Spatial(bp.Network):
             tau_r=bp.init.Normal(tau_r_e, 0.05 * tau_r_e, subkey),
             V_rev=V_rev_e,
         )
+        self.key, subkey = jax.random.split(self.key)
         self.ext2I = Synapse(
             pre=self.ext,
             post=self.I,

@@ -45,8 +45,8 @@ begin
 end
 
 begin
-    tmax = 22u"s" # * Bump up
-    tmin = 2u"s" # The transient. Simulations always begin at 0
+    tmax = 10u"s" # * Bump up
+    tmin = 5u"s" # The transient. Simulations always begin at 0
     fixed_params = (; rho,
                     dx,
                     sigma_ee,
@@ -68,7 +68,8 @@ begin
 end
 
 begin # * Run simulation
-    m = model(; fixed_params...)
+    # WorkingRegime.brainpy.math.random.seed(52) # ! This is broken.....
+    m = model(; fixed_params...) # Key here is broken too... why...
     x = bpsolve(m, tmax; populations = [:E], vars = [:spike, :V, :input],
                 transient = tmin) # :I
 end
@@ -79,12 +80,7 @@ begin # * Animate
     WorkingRegime.animate_rates(rates, dx; filename = "critical_demo.mp4")
 end
 
-if :I ∈ lookup(x, Population)  # * Spike raster
-    ispikes = x[Population = At(:I), Var = At(:spike)]
-    ispike_times = map(eachslice(ispikes, dims = Neuron)) do s
-        sts = times(s)[findall(s)]
-    end
-
+begin
     spike_times = map(eachslice(spikes, dims = Neuron)) do s
         sts = times(s)[findall(s)]
     end
@@ -95,6 +91,13 @@ if :I ∈ lookup(x, Population)  # * Spike raster
             p.tolist() |> convert2(Float32)
         end
     end
+end
+if :I ∈ lookup(x, Population)  # * Spike raster
+    ispikes = x[Population = At(:I), Var = At(:spike)]
+    ispike_times = map(eachslice(ispikes, dims = Neuron)) do s
+        sts = times(s)[findall(s)]
+    end
+
     radius = 0.15 # mm
     origin = [dx / 2, dx / 2]
     emask = map(epositions) do pos
@@ -145,51 +148,11 @@ if :I ∈ lookup(x, Population)  # * Spike raster
 end
 
 begin # * Fano factor
+    @info "Calculating Fano factor"
     dt = WorkingRegime.bpdt()
     τs = logrange(dt * 10, 0.1 * uconvert(u"ms", tmax - tmin) |> ustrip, length = 200)
     fano = fano_factor(ustripall(spikes), τs)
     # fano = fano[𝑡 = 1..1000]
-end
-begin # * Fano plot
-    f = OnePanel()
-    ax = Axis(f[1, 1]; xlabel = "Window size (ms)", ylabel = "Fano factor",
-              title = "Circuit model fano factor", xscale = log10, yscale = log10)
-
-    mf = mean(fano, dims = Neuron) |> ustripall
-    mf = dropdims(mf, dims = Neuron)
-    s = std(fano, dims = Neuron) |> ustripall
-    s = dropdims(s, dims = Neuron)
-
-    m = fit(MAPPLE, mf; components = 3, peaks = 0)
-    fit!(m, mf)
-
-    # * Plot each frequency break
-    fstops = m.params.components.log_f_stop |> collect .|> exp10
-    vlines!(ax, fstops[1:(end - 1)]; color = :gray,
-            linestyle = :dot)
-    prepend!(fstops, 1)
-    fstops[end] = maximum(dims(fano, 𝑡))
-    fcenters = fstops[1:(end - 1)] .+ diff(fstops) ./ 2
-    for (fcenter, β) in zip(fcenters, m.params.components.β)
-        mean_fano = mf[𝑡 = Near(fcenter)] .* 1.3
-        text = "c = $(round(β, sigdigits = 3))"
-        text!(ax, fcenter, mean_fano; text,
-              align = (:right, :bottom),
-              fontsize = 12)
-    end
-
-    # m.params.transition_width = 0.0
-
-    lines!(ax, mf)
-    bandwidth!(ax, decompose(mf)...; bandwidth = collect(s), alpha = 0.4)
-    # lines!.([ax], eachcol(fano)[1:500:end], linewidth=1, alpha=0.5, color=cornflowerblue)
-
-    fitted_fano = predict(m, mf)
-    lines!(ax, fitted_fano; color = crimson, linestyle = :dash)
-
-    display(f)
-
-    wsave(plotdir("critical_demo_fano_factor.pdf"), f)
 end
 
 # begin # * Membrane potential
@@ -329,17 +292,17 @@ end
 #     display(f)
 # end
 
-begin # * Input trace
-    input = x[Population = At(:E), Var = At(:input)][:, 900]
-    input = set(input, 𝑡 => uconvert.(u"s", times(input)))
-    input = rectify(input, dims = 𝑡)
-    lines(input[1:9000]) |> display
-end
-begin # * Input distribution
-    input = x[Population = At(:E), Var = At(:input)]
-    input = log10.(input[input .> 0.1])
-    hist(input[:], bins = 100, axis = (; yscale = log10))
-end
+# begin # * Input trace
+#     input = x[Population = At(:E), Var = At(:input)][:, 900]
+#     input = set(input, 𝑡 => uconvert.(u"s", times(input)))
+#     input = rectify(input, dims = 𝑡)
+#     lines(input[1:9000]) |> display
+# end
+# begin # * Input distribution
+#     input = x[Population = At(:E), Var = At(:input)]
+#     input = log10.(input[input .> 0.1])
+#     hist(input[:], bins = 100, axis = (; yscale = log10))
+# end
 # begin # * Input spectrum
 #     input = x[Population = At(:E), Var = At(:input)]
 #     input = set(input, 𝑡 => uconvert.(u"s", times(input)))
@@ -394,7 +357,7 @@ begin # * Plot the MSD and power spectrum, with fits, of the LFP, membrane poten
 end
 
 begin # * Fit distribution
-    ds = map(eachslice(input, dims = Neuron)) do v
+    ds = map(Chart(Threaded()), eachslice(input[1:10:end, :], dims = Neuron)) do v
         fit(Stable, v)
     end
     αs = getfield.(ds, :α)
@@ -405,6 +368,11 @@ end
 
 function fit_spectrum(s; components, peaks, f_range)
     negdims = [i for i in 1:ndims(s) if i != dimnum(s, 𝑓)] |> Tuple
+    original_s = deepcopy(s)
+    original_s = ustripall(original_s)
+    original_s = mean(original_s, dims = negdims)
+    original_s = dropdims(original_s, dims = negdims)
+
     s = s[𝑓 = f_range] |> ustripall
     s = mean(s, dims = negdims)
     s = dropdims(s, dims = negdims)
@@ -412,7 +380,7 @@ function fit_spectrum(s; components, peaks, f_range)
     m = fit(MAPPLE, _s; components, peaks)
     fit!(m, _s)
     fitted_s = predict(m, s)
-    return (; m, s, fitted_s, _s)
+    return (; m, s = original_s, fitted_s, _s)
 end
 function fit_mad(s; components, peaks, tau_range)
     negdims = [i for i in 1:ndims(s) if i != dimnum(s, 𝑡)] |> Tuple
@@ -426,21 +394,26 @@ function fit_mad(s; components, peaks, tau_range)
     return (; m, s, fitted_s)
 end
 begin # * Calculate spectra and MAD
-    vars = (; V, LFP, input)
-    spectra = map(Chart(ProgressLogger()), vars) do v
+    vars = (; V = V[:, 1:10:end], LFP = LFP[:, 1:10:end], input = input[:, 1:10:end])
+
+    @info "Calculating spectra"
+    spectra = map(Chart(Threaded()), vars) do v
         spectrum(v .- mean(v, dims = 𝑡), 0.5u"Hz")
     end
-    mads = map(vars) do v
+    @info "Calculating MADs"
+    mads = map(Chart(Threaded()), vars) do v
         madev(v, round.(Int, logrange(10, 10000, length = 100) |> unique) .* step(v))
     end
 end
 begin # * Fits
-    f_range = 6u"Hz" .. 1000u"Hz"
+    f_range = 10u"Hz" .. 1000u"Hz"
     tau_range = 0u"s" .. 1u"s"
-    fit_spectra = map(spectra) do s
+    @info "Fitting spectra"
+    fit_spectra = map(Chart(Threaded()), spectra) do s
         fit_spectrum(s; components = 1, peaks = 0, f_range)
     end
-    fit_mads = map(mads) do m
+    @info "Fitting MADs"
+    fit_mads = map(Chart(Threaded()), mads) do m
         fit_mad(m; components = 2, peaks = 0, tau_range)
     end
 end
@@ -474,7 +447,7 @@ if false
         m = fit_mads[v].m
 
         ax = Axis(gs[i, 2]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Frequency (Hz)", ylabel = "MSD (a.u.)")
+                  xlabel = "Time lag (s)", ylabel = "MSD (a.u.)")
         lines!(ax, s; color = cornflowerblue, alpha = 0.4)
         scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson)
@@ -519,7 +492,7 @@ begin # * Individual statistics
         m = fit_mads[v].m
 
         ax = Axis(f[1, 1]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Frequency (Hz)", ylabel = "MAD (a.u.)")
+                  xlabel = "Time lag (s)", ylabel = "MAD (a.u.)")
         lines!(ax, s; color = cornflowerblue, alpha = 0.4)
         scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson)
@@ -529,6 +502,253 @@ begin # * Individual statistics
               align = (:left, :bottom))
         wsave(plotdir("critical_demo", "$(v)_mad.pdf"), f)
     end
+end
+
+begin # * Supplementary figure: distribution of input distribution parameters
+    sf = FourPanel()
+    gs = subdivide(sf, 2, 2)
+    map(enumerate([(:α, αs), (:β, βs), (:μ, μs), (:σ, σs)])) do (i, (name, data))
+        m = mean(data)
+        ax = Axis(gs[i]; title = "$(name): mean=$(round(m, digits=2))",
+                  xlabel = string(name),
+                  ylabel = "Density")
+        ziggurat!(ax, data; bins = 20, normalization = :pdf,
+                  color = cornflowerblue)
+        vlines!(ax, [m]; color = crimson, linestyle = :dash)
+    end
+    display(sf)
+    wsave(plotdir("critical_demo", "input_distribution_parameters.pdf"), sf)
+end
+
+begin # * Additional properties: image and distribution fit
+    mf = FourPanel()
+    myna = 27
+
+    begin # * Add input fits to main figure
+        v = :input
+
+        s = fit_spectra[v].s
+        _s = fit_spectra[v]._s
+        fitted_s = fit_spectra[v].fitted_s
+        m = fit_spectra[v].m
+        ax = Axis(mf[2, 1:2][1, 2]; xscale = log10, yscale = log10, title = "Input PSD",
+                  xlabel = "Frequency (Hz)", ylabel = "PSD (a.u.)",
+                  limits = ((1, 1000), nothing))
+        lines!(ax, decompose(s)...; color = cornflowerblue, alpha = 0.4)
+        scatter!(ax, _s; color = cornflowerblue, markersize = 10)
+        lines!(ax, fitted_s; color = crimson)
+        text = m.params.components.β |> last
+        text = "b = $(round(text, digits = 2))"
+        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+              align = (:left, :bottom))
+
+        s = fit_mads[v].s
+        _s = s#fit_mads[v]._s
+        fitted_s = fit_mads[v].fitted_s
+        m = fit_mads[v].m
+        ax = Axis(mf[2, :][1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
+                  xlabel = "Time lag (s)", ylabel = "MAD (a.u.)")
+        lines!(ax, s; color = cornflowerblue, alpha = 0.4)
+        scatter!(ax, _s; color = cornflowerblue, markersize = 10)
+        lines!(ax, fitted_s; color = crimson)
+        text = m.params.components.β |> first
+        text = "a = $(round(text, digits = 2))"
+        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+              align = (:left, :bottom))
+    end
+
+    begin # * Fano plot
+        ax = Axis(mf[2, :][1, 3]; xlabel = "Window size (ms)", ylabel = "Fano factor",
+                  title = "Circuit model fano factor", xscale = log10, yscale = log10)
+
+        muf = nansafe(mean)(fano, dims = 2) |> ustripall
+        # muf = dropdims(muf, dims = Neuron)
+        s = nansafe(std)(fano, dims = 2) |> ustripall
+        # s = dropdims(s, dims = Neuron)
+
+        ma = fit(MAPPLE, muf; components = 3, peaks = 0)
+        fit!(ma, muf)
+
+        # * Plot each frequency break
+        fstops = ma.params.components.log_f_stop |> collect .|> exp10
+        vlines!(ax, fstops[1:(end - 1)]; color = :gray,
+                linestyle = :dot)
+        prepend!(fstops, 1)
+        fstops[end] = maximum(dims(fano, 𝑡))
+        fcenters = fstops[1:(end - 1)] .+ diff(fstops) ./ 2
+        for (fcenter, β) in zip(fcenters, ma.params.components.β)
+            mean_fano = muf[𝑡 = Near(fcenter)] .* 1.3
+            text = "c = $(round(β, sigdigits = 3))"
+            text!(ax, fcenter, mean_fano; text,
+                  align = (:right, :bottom),
+                  fontsize = 12)
+        end
+
+        # m.params.transition_width = 0.0
+
+        bandwidth!(ax, decompose(muf)...; bandwidth = collect(s), alpha = 0.4)
+        lines!(ax, muf)
+        # lines!.([ax], eachcol(fano)[1:500:end], linewidth=1, alpha=0.5, color=cornflowerblue)
+
+        fitted_fano = predict(ma, muf)
+        lines!(ax, fitted_fano; color = crimson, linestyle = :dash)
+    end
+
+    g = mf[1, 1:2] = GridLayout()
+    gg = g[1, 2] = GridLayout()
+
+    function track_com(field)
+        # field is expected to be (time × x × y)
+        # Assumes periodic boundary conditions (torus topology)
+        nt, nx, ny = size(field)
+
+        # Preallocate output vectors
+        com_x = zeros(nt)
+        com_y = zeros(nt)
+
+        # Create coordinate grids (0-indexed for proper angular mapping)
+        x_coords = 0:(nx - 1)
+        y_coords = 0:(ny - 1)
+
+        # Calculate center of mass for each time point
+        for t in 1:nt
+            slice = field[t, :, :]
+
+            # Calculate total intensity (use absolute value to handle negative fields)
+            weights = abs.(slice)
+            total_weight = sum(weights)
+
+            # Skip if total intensity is too small (avoid division by zero)
+            if total_weight < 1e-10
+                com_x[t] = nx / 2.0
+                com_y[t] = ny / 2.0
+                continue
+            end
+
+            # Convert to angles for periodic domain
+            # θ = 2π * coordinate / domain_size
+            θx = 2π .* x_coords' ./ nx
+            θy = 2π .* y_coords ./ ny
+
+            # Calculate weighted sum of unit vectors (circular mean)
+            ξx = sum(weights .* cos.(θx)) / total_weight
+            ζx = sum(weights .* sin.(θx)) / total_weight
+            ξy = sum(weights .* cos.(θy)) / total_weight
+            ζy = sum(weights .* sin.(θy)) / total_weight
+
+            # Convert back to coordinates using atan
+            θ_com_x = atan(ζx, ξx)
+            θ_com_y = atan(ζy, ξy)
+
+            # Map from [-π, π] back to [0, domain_size)
+            # Add 1 to convert from 0-indexed to 1-indexed
+            com_x[t] = mod(θ_com_x * nx / (2π), nx) + 1
+            com_y[t] = mod(θ_com_y * ny / (2π), ny) + 1
+        end
+
+        return com_x, com_y
+    end
+
+    ax = Axis(g[1, 1][1, 1]; xlabel = "X", ylabel = "Y",
+              limits = ((0, N), (0, N)))
+
+    t = 24000
+    deltat = 2000
+    input_grid = reshape(input, (size(input, 1), N, N))
+
+    input_grid = circshift(input_grid, (0, -30, -30)) # Avoid wraparounds
+
+    xs, ys = track_com(input_grid[(t - deltat):t, :, :])
+
+    heatmap!(ax, input_grid[t, :, :]'; colormap = seethrough(reverse(sunrise)))
+    lines!(ax, xs, ys; color = :white, linewidth = 3)
+    p = lines!(ax, xs, ys; color = (0:deltat) ./ 1000, colormap = (cgrad(:turbo)),
+               linewidth = 2)
+    Colorbar(g[1, 1][0, 1], p; vertical = false, label = "Time (s)",
+             tickformat = terseticks)
+
+    # * Input distribution
+    # * choose the neuron with the distribution closest to the average
+    # mps = [mean(αs), mean(βs), mean(μs), mean(σs)]
+    # dds = map(ds) do d
+    #     [d.α, d.β, d.μ, d.σ]
+    # end |> stack
+    # dists = dds .- mps
+    # idx = findmin(norm.(eachcol(dists)))[2]
+    # ps = dds[:, idx]
+
+    # ax = Axis(f[1, 3]; title = "Input distribution", xlabel = "Input (xxx)",
+    #           ylabel = "Density", xscale = log10, yscale = log10)
+    # bins = 0.1:0.1:5
+    # is = input[:, idx] # Sample neuron
+    # ziggurat!(ax, is; bins, normalization = :pdf,
+    #           color = cornflowerblue)
+    # S = Stable(ps...)
+    # lines!(ax, bins, pdf.(S, bins); color = crimson, linestyle = :dash)
+
+    begin # * Short trace
+        axv1 = Axis(gg[1, 1]; title = "Membrane potential (mV)",
+                    yticks = WilkinsonTicks(3; k_max = 3), ylabel = "Time (s)")
+        hlines!(axv1, [-50]; color = crimson)
+        hlines!(axv1, [-70]; color = crimson, linestyle = :dash)
+        hlines!(axv1, [mean(V)]; color = :gray, linestyle = :dash)
+        y = V[14000:24000, myna] |> ustripall
+        ts = times(y) .- times(y)[1]
+        lines!(axv1, ts, y, linewidth = 3)
+    end
+    begin # * Short trace
+        vi = input
+
+        axvi1 = Axis(gg[2, 1]; title = "Input current (nA)",
+                     xlabel = "Time (s)", yticks = WilkinsonTicks(3; k_max = 3))
+
+        # hlines!(ax, [-50]; color = crimson)
+        # hlines!(ax, [-70]; color = crimson, linestyle = :dash)
+        # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
+        y = vi[3500:8500, myna] |> ustripall
+        ts = times(y) .- times(y)[1]
+        lines!(axvi1, ts, y, linewidth = 3)
+    end
+    begin # * Voltage distribution
+        axv2 = Axis(gg[1, 2]; title = "Density", xticks = WilkinsonTicks(3; k_max = 3),
+                    xlabel = "mV")
+        # hideydecorations!(axv2)
+        # hidexdecorations!(axv2)
+
+        v = V[1:10:end]
+        bins = -70:0.1:-50
+        bins = bins[2:end]
+        ziggurat!(axv2, v; bins, normalization = :pdf,
+                  color = cornflowerblue)
+        vlines!(axv2, [mean(V)]; color = :gray, linestyle = :dash)
+    end
+    begin # * step size distribution
+        axvi2 = Axis(gg[2, 2]; title = "Density",
+                     xticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
+                     yscale = log10, xscale = log10, ylabel = "nA")
+        # hideydecorations!(axvi2)
+        # hidexdecorations!(axvi2)
+
+        vi = abs.(diff(input, dims = 1))
+
+        bins = 0:0.1:5
+        bins = bins[2:end]
+        ziggurat!(axvi2, vi[1:10:end]; bins, normalization = :pdf,
+                  color = cornflowerblue)
+        # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
+
+        # rowsize!(mf.layout, 0, Relative(0.2))
+    end
+
+    # linkyaxes!(axv1, axv2)
+    # linkyaxes!(axvi1, axvi2)
+
+    colsize!(gg, 1, Relative(0.75))
+    colsize!(g, 1, Relative(0.35))
+    rowsize!(mf.layout, 2, Relative(0.4))
+
+    display(mf)
+    wsave(plotdir("critical_demo", "key_properties.pdf"), mf)
 end
 
 # # * Check against fooof

@@ -30,10 +30,19 @@ end
 
 function __init__()
     if CondaPkg.backend() === :MicroMamba
-        push!(Base.DL_LOAD_PATH, projectdir(".CondaPkg/env/lib/")) # ! must use MicroMamba backend
+        libpath = joinpath(projectdir(".CondaPkg/env/lib/"))
+    elseif CondaPkg.backend() === :Pixi
+        libpath = joinpath(projectdir(".CondaPkg/.pixi/envs/default/lib/"))
+    end
+    if !isdir(libpath)
+        throw(error("Could not find the environment library path at $libpath. Make sure you have set up CondaPkg.jl with the Pixi or MicroMamba backend."))
+    else
+        push!(Base.DL_LOAD_PATH, libpath)
+    end
+    if isfile(joinpath(libpath, "libcudnn.so"))
         dlopen("libcudnn")
     else
-        throw(error("WorkingRegime.jl requires the MicroMamba backend for CondaPkg.jl. Set this using Preferences or an environment variable."))
+        throw(error("Could not find libcudnn.so in $libpath. Make sure you have installed cudnn in the CondaPkg.jl environment."))
     end
 
     pycopy!(sys, pyimport("sys"))
