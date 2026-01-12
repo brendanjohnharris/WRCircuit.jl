@@ -1,3 +1,4 @@
+import warnings
 import brainpy as bp
 import brainpy.math as bm
 from brainpy.connect import TwoEndConnector
@@ -88,9 +89,9 @@ class Spatial(bp.Network):
 
         if errors:
             error_msg = (
-                "Connectivity parameters incompatible with network size:\n  " +
-                "\n  ".join(errors) +
-                f"\n\nSuggestion: Increase rho (currently {self.rho}) or dx (currently {self.dx}), "
+                "Connectivity parameters incompatible with network size:\n  "
+                + "\n  ".join(errors)
+                + f"\n\nSuggestion: Increase rho (currently {self.rho}) or dx (currently {self.dx}), "
                 f"or reduce the K_* parameters to match your desired network size."
             )
             raise ValueError(error_msg)
@@ -148,8 +149,15 @@ class Spatial(bp.Network):
         self.kernel = kernel
 
         if key is None:
-            key = jax.random.PRNGKey(np.random.randint(0, 2**32))
-        self.key = key
+            # Add a warning here about non-reproducibility
+            warnings.warn(
+                "No random seed provided. Results may not be reproducible.", UserWarning
+            )
+            self.key = jax.random.PRNGKey(np.random.randint(0, 2**32))
+        elif isinstance(key, int):
+            self.key = jax.random.PRNGKey(key)
+        else:
+            self.key = key
 
         self.K_ee = K_ee
         self.K_ei = K_ei

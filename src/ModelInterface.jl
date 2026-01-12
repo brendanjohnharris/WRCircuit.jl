@@ -59,7 +59,7 @@ function monitors2popvars(monitors)
     return return populations, vars
 end
 function bpsolve(net::Py, time::Real; populations = [:E, :I], vars = [:V],
-                 transient = 500u"ms",
+                 transient = 0u"ms",
                  inputs = nothing,
                  kwargs...)
     monitors = popvars2monitors(populations, vars)

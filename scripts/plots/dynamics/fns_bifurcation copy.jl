@@ -3,7 +3,7 @@
 #=
 exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-ENV["WorkingRegime_BACKEND"] = "cpu"
+ENV["WORKINGREGIME_BACKEND"] = "cpu"
 using DrWatson
 DrWatson.@quickactivate
 using WorkingRegime
@@ -93,7 +93,7 @@ transient = 5000u"ms"
 
 begin
     addprocs(3)
-    @everywhere ENV["WorkingRegime_BACKEND"] = "cpu"
+    @everywhere ENV["WORKINGREGIME_BACKEND"] = "cpu"
     @everywhere using WorkingRegime
     @everywhere using JLD2
     @everywhere WorkingRegime.@preamble

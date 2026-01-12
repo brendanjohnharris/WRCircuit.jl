@@ -13,6 +13,7 @@ function _preamble()
         using PythonCall
         using Unitful
         using Statistics
+        using Bootstrap
         using TimeseriesTools
         using CairoMakie
         using TimeseriesMakie
@@ -62,40 +63,6 @@ end
 function cv(X::MultivariateSpikeTrain)
     cv.(eachslice(X, dims = dims(X)[2:end]))
 end
-
-# * Bootstrap averages
-_confidence(x, z = 1.96) = z * std(x) ./ sqrt(length(x)) # * 1.96 for 95% confidence interval
-confidence(x, args...; dims = 1:ndims(x)) = mapslices(x -> _confidence(x, args...), x; dims)
-function quartiles(X::AbstractArray; dims = 1)
-    q1 = mapslices(x -> quantile(x, 0.25), X; dims)
-    q2 = mapslices(x -> quantile(x, 0.5), X; dims)
-    q3 = mapslices(x -> quantile(x, 0.75), X; dims)
-end
-
-function bootstrapaverage(average, x::AbstractVector{T}; confint = 0.95,
-                          N = 10000)::Tuple{T, Tuple{T, T}} where {T}
-    sum(!isnan, x) < 5 && return (NaN, (NaN, NaN))
-
-    # * Estimate a sampling distribution of the average
-    x = filter(!isnan, x)
-    b = Bootstrap.bootstrap(nansafe(average), x, Bootstrap.BalancedSampling(N))
-    μ, σ... = only(Bootstrap.confint(b, Bootstrap.BCaConfInt(confint)))
-    return μ, σ
-end
-
-function bootstrapaverage(average, X::AbstractArray; dims = 1, kwargs...)
-    ds = [i ∈ dims ? 1 : Colon() for i in 1:ndims(X)]
-    μ = similar(X[ds...])
-    σl = similar(μ)
-    σh = similar(μ)
-    negdims = filter(!∈(dims), 1:ndims(X)) |> Tuple
-    Threads.@threads for (i, x) in collect(enumerate(eachslice(X; dims = negdims)))
-        μ[i], (σl[i], σh[i]) = bootstrapaverage(average, x[:]; kwargs...)
-    end
-    return μ, (σl, σh)
-end
-bootstrapmedian(args...; kwargs...) = bootstrapaverage(median, args...; kwargs...)
-bootstrapmean(args...; kwargs...) = bootstrapaverage(mean, args...; kwargs...)
 
 """
 Structure Function Analysis of Turbulent Flows
@@ -304,5 +271,7 @@ function log10spectrum(x::AbstractSpectrum)
 end
 
 function convert2(u::Unitful.Units, x::AbstractRange)
-    uconvert(u, first(x)):uconvert(u, step(x)):uconvert(u, last(x))
+    a = uconvert(u, first(x))
+    b = uconvert(u, last(x))
+    return range(a, b, length = length(x))
 end

@@ -3,7 +3,7 @@
 #=
 exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# ENV["WorkingRegime_BACKEND"] = "cpu" # ! This does nothing if set here...
+# ENV["WORKINGREGIME_BACKEND"] = "cpu" # ! This does nothing if set here...
 # ENV["CUDA_VISIBLE_DEVICES"] = ""
 using DrWatson
 DrWatson.@quickactivate
@@ -93,11 +93,11 @@ end
 # xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
 
 # begin
-#     addprocs(1; env = ["WorkingRegime_BACKEND" => "cpu", "CUDA_VISIBLE_DEVICES" => ""])
+#     addprocs(1; env = ["WORKINGREGIME_BACKEND" => "cpu", "CUDA_VISIBLE_DEVICES" => ""])
 #     @everywhere ENV["JULIA_CONDAPKG_OFFLINE"] = true
 #     # @everywhere ENV["TF_CPP_MIN_LOG_LEVEL"] = 0
 #     # @everywhere ENV["JAX_PLATFORM_NAME"] = "cpu"
-#     @everywhere ENV["WorkingRegime_BACKEND"] = "cpu" # Does not seem to work after startup
+#     @everywhere ENV["WORKINGREGIME_BACKEND"] = "cpu" # Does not seem to work after startup
 #     @everywhere using WorkingRegime
 #     @everywhere using JLD2
 #     @everywhere jax.default_device = jax.devices("cpu")[0]

@@ -1,4 +1,6 @@
 module WorkingRegime
+# Set JAX determinism flags BEFORE importing any JAX/BrainPy code
+# ENV["XLA_FLAGS"] = "XLA_FLAGS=--xla_gpu_deterministic_ops=true"
 using DrWatson
 # using CUDA
 # using cuDNN
@@ -66,8 +68,8 @@ function __init__()
     pycopy!(numpy, pyimport("numpy"))
     pycopy!(gc, pyimport("gc"))
 
-    if haskey(ENV, "WorkingRegime_BACKEND")
-        backend = ENV["WorkingRegime_BACKEND"]
+    if haskey(ENV, "WORKINGREGIME_BACKEND")
+        backend = ENV["WORKINGREGIME_BACKEND"]
         if backend == "cpu"
             jax.default_device = jax.devices("cpu")[0]
             jax.config.update("jax_platform_name", "cpu")
