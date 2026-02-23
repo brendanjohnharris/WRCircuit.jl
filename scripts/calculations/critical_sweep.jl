@@ -1,7 +1,7 @@
 #! /bin/bash
 # -*- mode: julia -*-
 #=
-exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
+exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
@@ -35,46 +35,72 @@ begin # * Fixed parameters
 end
 
 begin # And format parameters
-    delta = Dim{:delta}(range(3, 5, length = 32))
-    obs = Obs(1:1)
-end
-begin
+    delta = Dim{:delta}(range(3, 5, length = 16))
+    Delta_g_K = range(0, 0.005, length = 21) |> Dim{:Delta_g_K}
+
+    delta = round.(delta; sigdigits = 3)
+    Delta_g_K = round.(Delta_g_K; sigdigits = 3)
+
+    parameter_grid = Iterators.product(delta, Delta_g_K)
+
+    parameter_vector = [(; delta = d, Delta_g_K = gk)
+                        for (d, gk) in parameter_grid]
+
     if !isdir(path)
         mkpath(path)
     end
-    exists = parse_savename.(readdir(path); connector = string(connector))
-    exists = getindex.(exists, 2)
-    exists = getindex.(exists, "delta")
-
-    delta = delta[round.(delta; sigdigits = 3) .∉ Ref(exists)]
-    parameter_grid = map(first, Iterators.product(delta, obs))
-    batches = Iterators.partition(parameter_grid[:], batch_size)
 end
-begin end
-begin# * Run simulation
-    for (i, delta) in enumerate(batches)
-        @info "Batch $i / $(length(batches))"
-        keys = rand(UInt32, length(delta))
-        jax_keys = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(k) for k in keys]) # ? Important, must be python array
-        params = (; delta, key = jax_keys)
 
+begin
+    parameter_vector = filter(parameter_vector) do p
+        filename = savename(p; connector = string(connector))
+        exists = isfile(joinpath(path, filename) * ".jld2")
+        return !exists
+    end
+    sort!(parameter_vector; by = Base.Fix2(getindex, :Delta_g_K)) # Group by Delta_G_K
+    batches = Iterators.partition(parameter_vector[:], batch_size)
+end
+begin# * Run simulation
+    for (j, _params) in enumerate(batches)
+        @info "Batch $j / $(length(batches))"
+
+        @debug "Creating keys..."
+        keys = rand(UInt32, length(_params))
+        jax_keys = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(k) for k in keys])
+        # # ? Important, must be python array
+
+        @debug "Creating params..."
+        # * Vector of tuples to tuple of vectors
+        keys = propertynames(first(_params))
+        params = (; (k => getfield.(_params, k) for k in keys)..., key = jax_keys)
+
+        @debug "Creating runner..."
         runner = WorkingRegime.create_run(model; monitors, tmax, transient)
+
+        @debug "Creating stats_run..."
         stats_run = WorkingRegime.create_stats_run(runner, stat_funcs)
+
+        @debug "Running partial_vmap..."
         stats, sweep_parameters = WorkingRegime.partial_vmap(stats_run)(params)
+
+        @debug "Formatting results..."
         res = WorkingRegime.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
 
-        for i in eachindex(delta)
-            d = params[:delta][i]
-            ps = (; delta = d, key = keys[i])
-            merged_params = (; default_params[:parameters]..., ps...)
+        @debug "Processing individual params..."
+        for i in eachindex(_params)
+            @debug "  Processing $i / $(length(_params))"
+            filename = savename(_params[i], "jld2"; connector)
 
-            r = res.monitor[(; delta = d)]
+            merged_params = (; default_params[:parameters]..., _params[i]...)
+            ks = Base.keys(res.monitor)
+            idx = Dict.(pairs.(ks)) .== [Dict(pairs(_params[i]))]
+            r = res.monitor[only(collect(ks)[idx])]
 
             begin # * Input statistics
                 x = r.var"E.input"
                 x = x .- mean(x, dims = 𝑡) # Remove DC offset
                 # * MAD of inputs
-                τs = logrange(10, 1u"s" / uconvert(u"s", dt), length = 100)
+                τs = logrange(10, 10000, length = 100)
                 τs = unique(round.(Int, τs)) .* dt
                 mad = map(eachslice(x, dims = Neuron)) do _x
                     madev(_x, τs)
@@ -87,27 +113,20 @@ begin# * Run simulation
                 end |> stack
 
                 # * Downsample for distribution estimate
-                distribution = x[1:10:end, :]
+                # distribution = x[1:10:end, :]
             end
 
             out = Dict("parameters" => merged_params,
                        "spikes" => r.var"E.spike",
                        "inputs/mad" => mad,
-                       "inputs/psd" => psd,
-                       "inputs/distribution" => distribution)
-            filename = savename(ps, "jld2"; connector)
+                       "inputs/psd" => psd
+                       #    "inputs/distribution" => distribution
+                       )
             tagsave(joinpath(path, filename), out)
-            r = []
-            x = []
-            out = []
-            GC.gc()
         end
 
-        stats = []
-        res = []
-        out = []
-        runner = []
-        stats_run = []
-        GC.gc()
+        @debug "Batch $j complete"
+        flush(stderr)
+        flush(stdout)
     end
 end

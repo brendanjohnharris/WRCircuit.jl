@@ -1,7 +1,7 @@
 name = "WorkingRegime"
 uuid = "a2fb53ce-e249-4e8c-8865-d217552c1552"
-authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
 version = "1.0.0-DEV"
+authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
@@ -26,6 +26,7 @@ Normalization = "be38d6a3-8366-4a42-ad57-222272b5bbe7"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SimulationBasedInference = "78927d98-f421-490e-8789-96b006983a5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StableDistributions = "3756410d-ab6e-41a2-9897-9aa267a7ef31"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
@@ -39,35 +40,41 @@ USydClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [sources]
+MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl.git"}
+SimulationBasedInference = {rev = "main", url = "https://github.com/brendanjohnharris/SimulationBasedInference.jl"}
+TimeseriesBase = {path = "../../TimeseriesToolsBase.jl"}
+TimeseriesTools = {path = "../../TimeseriesTools.jl"}
 USydClusters = {rev = "main", url = "https://github.com/brendanjohnharris/UsydClusters.jl/"}
 
 [compat]
-Accessors = "0.1.42"
-Autocorrelations = "0.1.0"
-Bootstrap = "2.4.0"
-CairoMakie = "0.15.6"
-CondaPkg = "0.2.26"
-DataInterpolations = "7.2.0"
+Accessors = "0.1"
+Autocorrelations = "0.1"
+Bootstrap = "2.4"
+CairoMakie = "0.15"
+CondaPkg = "0.2"
+DataInterpolations = "7"
 DimensionalData = "0.29.0 - 0.29.24, 0.29.26 - 1"
 Distributed = "1.11.0"
 Distributions = "0.25.113"
-DrWatson = "2.18.0"
+DrWatson = "2"
 Foresight = "0.4.0"
 GraphMakie = "0.6"
 IntervalSets = "0.7"
-JLD2 = "0.5.11"
+JLD2 = "0.5"
 Libdl = "1.11.0"
 LinearAlgebra = "1.11.0"
-MeanSquaredDisplacement = "0.2.1"
+MeanSquaredDisplacement = "0.2"
 MoreMaps = "0.2.1"
 Normalization = "0.9"
-Optim = "1.13.2"
+Optim = "1.13"
+PythonCall = "0.9"
 Random = "1.11.0"
+SimulationBasedInference = "0.1.13"
 SparseArrays = "1.11.0"
 StableDistributions = "1.0.1"
-StatsBase = "0.34.4"
-Suppressor = "0.2.8"
-Term = "2.0.6"
+StatsBase = "0.34"
+Suppressor = "0.2"
+Term = "2"
 TimeseriesMakie = "0.2.1"
 TimeseriesTools = "0.8"
 USydClusters = "1.0.0"
