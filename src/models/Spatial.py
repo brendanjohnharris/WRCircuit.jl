@@ -127,7 +127,7 @@ class Spatial(bp.Network):
         kernel=ExponentialKernel,
         method="exp_auto",
         key=None,
-        copy_conn=False,  # Whether to copy connectivity from the provided WorkingRegime
+        copy_conn=False,  # Whether to copy connectivity from the provided WRCircuit
     ):
         super().__init__()
 

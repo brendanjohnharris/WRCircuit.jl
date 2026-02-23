@@ -5,12 +5,12 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Load sweep parameters
@@ -152,7 +152,7 @@ end
 
 # function susceptibility(x; dt = 100u"ms")
 #     # * First bin into ms bins
-#     X = groupby(x, 𝑡 => Base.Fix2(WorkingRegime.group_dt, dt))
+#     X = groupby(x, 𝑡 => Base.Fix2(WRCircuit.group_dt, dt))
 
 #     # * Active neurons
 #     X = map(X) do x

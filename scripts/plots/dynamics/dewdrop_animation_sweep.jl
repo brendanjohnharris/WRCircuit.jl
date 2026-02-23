@@ -5,17 +5,17 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --color=yes "${BASH_SOURCE[0]}" 
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Model parameters
-    model = WorkingRegime.models.Spatial
+    model = WRCircuit.models.Spatial
 
     dx = 0.5
     rho = 20000.0
-    kernel = WorkingRegime.distances.GaussianKernel
+    kernel = WRCircuit.distances.GaussianKernel
     J_ee = 0.0008
     # delta = 3.5
     nu = 7.0
@@ -43,12 +43,12 @@ begin
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
 
     monitors = ("E.spike",)
-    stat_funcs = Dict(#"rate" => WorkingRegime.stats.firing_rate,
-                      #   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
-                      #   "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
-                      #   "temporal_average" => WorkingRegime.stats.temporal_average,
-                      #   "mua" => WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt))),
-                      "monitor" => WorkingRegime.stats.monitor)
+    stat_funcs = Dict(#"rate" => WRCircuit.stats.firing_rate,
+                      #   "susceptibility" => WRCircuit.stats.susceptibility(bin = 10),
+                      #   "spike_spectrum" => WRCircuit.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => WRCircuit.stats.temporal_average,
+                      #   "mua" => WRCircuit.stats.mua(bin = ustrip(to_ms(mua_dt))),
+                      "monitor" => WRCircuit.stats.monitor)
 end
 begin# * Generate dict of parameter vectors
     sweep = (; delta = range(2.0, 6.0, length = 9))
@@ -56,21 +56,21 @@ begin# * Generate dict of parameter vectors
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
     sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
     n_iters = length(first(values(sweep_params)))
-    jax_keys = WorkingRegime.jax.random.split(WorkingRegime.jax.random.PRNGKey(42), n_iters)
-    sweep_params["key"] = WorkingRegime.numpy.array.(jax_keys) # * So that each run is independent
+    jax_keys = WRCircuit.jax.random.split(WRCircuit.jax.random.PRNGKey(42), n_iters)
+    sweep_params["key"] = WRCircuit.numpy.array.(jax_keys) # * So that each run is independent
 end
 begin # * Create sweep function
-    run = WorkingRegime.stats.create_run(model, pydict(fixed_params), monitors,
-                                         ustrip(to_ms(tmax)),
-                                         ustrip(to_ms(tmin)))
-    stats_run = WorkingRegime.stats.create_stats_run(run, pydict(stat_funcs))
+    run = WRCircuit.stats.create_run(model, pydict(fixed_params), monitors,
+                                     ustrip(to_ms(tmax)),
+                                     ustrip(to_ms(tmin)))
+    stats_run = WRCircuit.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = WorkingRegime.stats.partial_vmap(stats_run, batch_size = 5)(pydict(sweep_params))
+    stats, sweep_parameters = WRCircuit.stats.partial_vmap(stats_run, batch_size = 5)(pydict(sweep_params))
 end
 begin # * Loop over stats and construct spike trains
     ts = range(0u"s", tmax,
-               step = convert2(Float64)(WorkingRegime.brainpy.share["dt"]) * u"ms")[2:end]
+               step = convert2(Float64)(WRCircuit.brainpy.share["dt"]) * u"ms")[2:end]
     deltas = sweep_parameters["delta"] |> convert2(Vector) |> Dim{:delta}
     spikes = stats["monitor"]["E.spike"] |> PyArray
     # spikes = permutedims(spikes, (2, 1, 3)) # * Shape is now (t, delta, n)
@@ -114,7 +114,7 @@ end
 #     f
 # end
 # begin # * Animation loop
-#     record(f, "WorkingRegime_sweep.mp4", eachindex(Idxs), framerate = 48) do i
+#     record(f, "WRCircuit_sweep.mp4", eachindex(Idxs), framerate = 48) do i
 #         idxs[] = Idxs[i]
 #     end
 # end
@@ -140,7 +140,7 @@ begin # * Animate
     pbar = ProgressBar()
     job = addjob!(pbar; N = length(ts))
     with(pbar) do
-        record(f, "WorkingRegime_sweep_all_new.mp4", ts, framerate = 24) do t
+        record(f, "WRCircuit_sweep_all_new.mp4", ts, framerate = 24) do t
             for (i, delta) in enumerate(deltas)
                 idxs[i][] = spikeidxs[t, i]
             end
@@ -158,7 +158,7 @@ end
 #     f
 # end
 # begin # * Animation loop
-#     record(f, "WorkingRegime_sweep_heatmap.mp4", axes(XX)[1], framerate = 48) do i
+#     record(f, "WRCircuit_sweep_heatmap.mp4", axes(XX)[1], framerate = 48) do i
 #         xx[] = XX[i, :, :] |> parent
 #     end
 # end

@@ -1,4 +1,4 @@
-using WorkingRegime
+using WRCircuit
 using CUDA
 using Test
 

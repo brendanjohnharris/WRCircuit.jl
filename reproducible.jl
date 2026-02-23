@@ -1,12 +1,12 @@
 # Set JAX determinism flags BEFORE importing any JAX/BrainPy code
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 
 # Set up a fixed seed
-model = WorkingRegime.models.Spatial
+model = WRCircuit.models.Spatial
 seed = 42
-key = WorkingRegime.PRNGKey(seed)
+key = WRCircuit.PRNGKey(seed)
 
 # Simulation parameters (smaller network for speed)
 params = (rho = 20000,
@@ -22,7 +22,7 @@ model1 = model(; params...)
 println("\nRunning model 1.")
 
 # Run model 1
-# runner1 = WorkingRegime.bprun(model1, duration; monitors = ("E.spike", "I.spike"))
+# runner1 = WRCircuit.bprun(model1, duration; monitors = ("E.spike", "I.spike"))
 x1 = bpsolve(model1, duration; populations = [:E], vars = [:spike, :V, :input])
 
 println("Creating model 2...")
@@ -31,7 +31,7 @@ model2 = model(; params...)
 println("\nRunning model 2.")
 
 # Run model 2
-# runner2 = WorkingRegime.bprun(model2, duration; monitors = ("E.spike", "I.spike"))
+# runner2 = WRCircuit.bprun(model2, duration; monitors = ("E.spike", "I.spike"))
 x2 = bpsolve(model2, duration; populations = [:E], vars = [:spike, :V, :input])
 
 # Extract spike data
@@ -65,16 +65,16 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 using Bootstrap
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = WorkingRegime.models.Spatial
+    model = WRCircuit.models.Spatial
     begin # FNS parameters
         rho = 20000
         dx = 0.5
@@ -112,16 +112,16 @@ begin
 end
 
 begin # * Run simulation
-    WorkingRegime.brainpy.math.random.seed(52)
-    params1 = (; rho, dx, key = WorkingRegime.PRNGKey(52))
+    WRCircuit.brainpy.math.random.seed(52)
+    params1 = (; rho, dx, key = WRCircuit.PRNGKey(52))
     m = model(; params1...)
     x = bpsolve(m, tmax; populations = [:E], vars = [:spike, :V, :input],
                 transient = tmin)
 end
 
 begin # * Run simulation
-    WorkingRegime.brainpy.math.random.seed(52)
-    params2 = (; rho, dx, key = WorkingRegime.PRNGKey(52))
+    WRCircuit.brainpy.math.random.seed(52)
+    params2 = (; rho, dx, key = WRCircuit.PRNGKey(52))
     m = model(; params2...)
     x2 = bpsolve(m, tmax; populations = [:E], vars = [:spike, :V, :input],
                  transient = tmin)
@@ -129,7 +129,7 @@ begin # * Run simulation
 end
 
 # # Run the SAME model twice from the SAME initial key
-# key = WorkingRegime.PRNGKey(52)
+# key = WRCircuit.PRNGKey(52)
 # params = (rho = 20000, dx = 0.5[3], key = key)
 
 # m1 = model(; params...)

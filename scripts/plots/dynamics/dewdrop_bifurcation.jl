@@ -6,16 +6,16 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --startup-file=no --color=yes "$
 # $HOME/build/julia-1.11.2/bin/julia maybe
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.WorkingRegime
-    modelname = "WorkingRegime"
+    model = models.WRCircuit
+    modelname = "WRCircuit"
 
-    begin # WorkingRegime parameters
+    begin # WRCircuit parameters
         dx = 0.75 # mm
         rho = 30000.0
         kernel = distances.GaussianKernel
@@ -49,7 +49,7 @@ end
 begin
     stats = map(nus) do nu
         @info "Simulating for nu = $nu"
-        WorkingRegime.clear_live_arrays()
+        WRCircuit.clear_live_arrays()
         begin
             m = model(; parameters..., nu, key = jax.random.PRNGKey(42)) # Build once to get connectivity
 
@@ -59,7 +59,7 @@ begin
             xs = range.(0 .+ Δx / 2, domain .- Δx / 2, N)
 
             conn = m.get_connectivity()
-            conn = models.WorkingRegime.pytree_to_numpy(conn) # Freeze the connectivity
+            conn = models.WRCircuit.pytree_to_numpy(conn) # Freeze the connectivity
             _params = m.get_input_params() |> convert2(Dict{Symbol, Any})
             model_class = m.__class__
 
@@ -90,7 +90,7 @@ begin
                 λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
                 λ = uconvert.(u"Hz", mean(λ))
             end
-            # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
+            # WRCircuit.clear_live_arrays() # Does this operate @everywhere? Seems not
             return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end

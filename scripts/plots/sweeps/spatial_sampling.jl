@@ -5,12 +5,12 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Random
 using SparseArrays
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Sampling parameters
@@ -19,8 +19,8 @@ begin # * Sampling parameters
 end
 
 begin # * Fixed parameters
-    model = WorkingRegime.models.Spatial
-    default_params = WorkingRegime.defaults(model)
+    model = WRCircuit.models.Spatial
+    default_params = WRCircuit.defaults(model)
 
     tmax = 30u"s"
     transient = 5u"s" # The transient. Simulations always begin at 0
@@ -29,10 +29,10 @@ begin # * Fixed parameters
     key = 42
 
     # mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
-    # mua_func = WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt)))
+    # mua_func = WRCircuit.stats.mua(bin = ustrip(to_ms(mua_dt)))
 
     # dn = round(Int, sqrt(rho * dx^2))
-    # positions = WorkingRegime.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
+    # positions = WRCircuit.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
     # positions = map(positions) do pos
     #     map(pos) do p
     #         p.tolist() |> convert2(Float32)
@@ -56,28 +56,28 @@ begin # * Fixed parameters
     #     dp = min.(dp, dx .- dp)
     #     norm(dp) < radius
     # end # scatter(positions.|> Point2f, color=mask) to check
-    # local_idxs = findall(mask) |> WorkingRegime.numpy.asarray
+    # local_idxs = findall(mask) |> WRCircuit.numpy.asarray
 
-    # stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
-    #                   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
-    #                   #   "radial_autocorrelation" => WorkingRegime.stats.radial_autocorrelation(positions,
+    # stat_funcs = Dict("rate" => WRCircuit.stats.firing_rate,
+    #                   "susceptibility" => WRCircuit.stats.susceptibility(bin = 10),
+    #                   #   "radial_autocorrelation" => WRCircuit.stats.radial_autocorrelation(positions,
     #                   #                                                                    0.05))#,
-    #                   #  "efficiency" => WorkingRegime.stats.efficiency(bin_indices, 1000))
-    #                   # "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
-    #                   #  "temporal_average" => WorkingRegime.stats.temporal_average,
-    #                   #   "grand_distribution" => WorkingRegime.stats.grand_distribution(n_bins = 1000),
+    #                   #  "efficiency" => WRCircuit.stats.efficiency(bin_indices, 1000))
+    #                   # "spike_spectrum" => WRCircuit.stats.spike_spectrum(n_segments = 10),
+    #                   #  "temporal_average" => WRCircuit.stats.temporal_average,
+    #                   #   "grand_distribution" => WRCircuit.stats.grand_distribution(n_bins = 1000),
     #                   "mua" => mua_func)
-    # stat_funcs = Dict(#"rate" => WorkingRegime.stats.firing_rate,
-    #   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
-    #   "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
-    #   "temporal_average" => WorkingRegime.stats.temporal_average,
-    #   "mua" => WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt))),
+    # stat_funcs = Dict(#"rate" => WRCircuit.stats.firing_rate,
+    #   "susceptibility" => WRCircuit.stats.susceptibility(bin = 10),
+    #   "spike_spectrum" => WRCircuit.stats.spike_spectrum(n_segments = 10),
+    #   "temporal_average" => WRCircuit.stats.temporal_average,
+    #   "mua" => WRCircuit.stats.mua(bin = ustrip(to_ms(mua_dt))),
     # metadata = (; positions, bin_indices, mua_dt, tmax, transient, monitors, dt)
 
     monitors = ["E.spike"] |> pytuple
-    stat_funcs = Dict("monitor" => WorkingRegime.stats.monitor)
+    stat_funcs = Dict("monitor" => WRCircuit.stats.monitor)
 
-    dt = pyconvert(Float32, WorkingRegime.brainpy.share["dt"]) * u"ms"
+    dt = pyconvert(Float32, WRCircuit.brainpy.share["dt"]) * u"ms"
     metadata = (; tmax, transient, monitors, dt)
 end
 
@@ -111,7 +111,7 @@ begin # * The idea is to randomly sample some parameters from discretized parame
 
     hash_grid = map(parameter_grid) do p
         merged_params = (; default_params[:parameters]..., p..., key = [0, key])
-        Base.hash(merged_params |> WorkingRegime.sortparams) # Order matters for named tuples
+        Base.hash(merged_params |> WRCircuit.sortparams) # Order matters for named tuples
     end
 
     tagsave(joinpath(path, "parameter_grid.jld2"),
@@ -144,8 +144,8 @@ while true
         these_ps = these_ps[idxs]
     end
     begin # And format parameters
-        jax_keys = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(key)
-                                                  for _ in 1:batch_size]) # Important, must be python array
+        jax_keys = WRCircuit.jax.numpy.stack([WRCircuit.PRNGKey(key)
+                                              for _ in 1:batch_size]) # Important, must be python array
 
         pnames = keys(these_ps |> first)
         these_ps = map(pnames) do n
@@ -155,19 +155,19 @@ while true
     end
 
     begin # * And run the batch simulation
-        run = WorkingRegime.create_run(model; monitors, tmax, transient)
-        stats_run = WorkingRegime.create_stats_run(run, stat_funcs)
-        stats, sweep_parameters = WorkingRegime.partial_vmap(stats_run; static_argnames)(these_ps)
+        run = WRCircuit.create_run(model; monitors, tmax, transient)
+        stats_run = WRCircuit.create_stats_run(run, stat_funcs)
+        stats, sweep_parameters = WRCircuit.partial_vmap(stats_run; static_argnames)(these_ps)
     end
 
     begin # * Format the monitors
-        res = WorkingRegime.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
+        res = WRCircuit.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
     end
 
     begin # * Save each result, combining swept params with default model values
         map((collect ∘ keys ∘ last ∘ first)(res)) do params
             merged_params = (; default_params[:parameters]..., params..., key = [0, key])
-            hsh = Base.hash(WorkingRegime.sortparams(merged_params))
+            hsh = Base.hash(WRCircuit.sortparams(merged_params))
             @assert hsh ∈ hash_grid
             filename = hsh
             r = map(collect(res)) do (k, v)

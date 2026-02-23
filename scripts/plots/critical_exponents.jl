@@ -5,15 +5,15 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = WorkingRegime.models.Spatial
+    model = WRCircuit.models.Spatial
     begin # FNS parameters
         rho = 20000
         dx = 0.5
@@ -61,6 +61,6 @@ begin
                     Delta_g_K)
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
-    # stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
-    #                   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10))
+    # stat_funcs = Dict("rate" => WRCircuit.stats.firing_rate,
+    #                   "susceptibility" => WRCircuit.stats.susceptibility(bin = 10))
 end

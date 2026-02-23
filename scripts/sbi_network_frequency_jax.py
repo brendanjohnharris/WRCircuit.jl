@@ -1,5 +1,5 @@
 #### python
-# filepath: /home/brendan/OneDrive/Masters/Code/Vortices/Julia/WorkingRegime.jl/scripts/sbi_network_frequency_jax.py
+# filepath: /home/brendan/OneDrive/Masters/Code/Vortices/Julia/WRCircuit.jl/scripts/sbi_network_frequency_jax.py
 import os
 import sys
 import numpy as np
@@ -163,7 +163,6 @@ def main():
         jr.PRNGKey(3), params, y_observed, n_samples=1000
     )
     print("Posterior samples:", posterior_samples)
-
 
 
 if __name__ == "__main__":

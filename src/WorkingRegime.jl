@@ -1,4 +1,4 @@
-module WorkingRegime
+module WRCircuit
 # Set JAX determinism flags BEFORE importing any JAX/BrainPy code
 # ENV["XLA_FLAGS"] = "XLA_FLAGS=--xla_gpu_deterministic_ops=true"
 using DrWatson
@@ -68,8 +68,8 @@ function __init__()
     pycopy!(numpy, pyimport("numpy"))
     pycopy!(gc, pyimport("gc"))
 
-    if haskey(ENV, "WORKINGREGIME_BACKEND")
-        backend = ENV["WORKINGREGIME_BACKEND"]
+    if haskey(ENV, "WRCircuit_BACKEND")
+        backend = ENV["WRCircuit_BACKEND"]
         if backend == "cpu"
             jax.default_device = jax.devices("cpu")[0]
             jax.config.update("jax_platform_name", "cpu")
@@ -79,7 +79,7 @@ function __init__()
             jax.config.update("jax_platform_name", "gpu")
             brainpy.math.set_platform("gpu")
         else
-            @warn "Unknown WorkingRegime.jl backend $backend"
+            @warn "Unknown WRCircuit.jl backend $backend"
         end
     end
 
@@ -102,7 +102,7 @@ convert2(x::Type) = Base.Fix1(pyconvert, x)
 jax_device() = xla_bridge.get_backend().platform |> convert2(String)
 jax_live_arrays() = xla_bridge.get_backend().live_arrays()
 function clear_live_arrays()
-    [x.delete() for x in WorkingRegime.jax_live_arrays()]
+    [x.delete() for x in WRCircuit.jax_live_arrays()]
     PythonCall.GC.gc()
 end
 

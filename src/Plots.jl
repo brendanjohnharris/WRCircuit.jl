@@ -3,7 +3,7 @@ using CairoMakie
 function infer_geometry(A, dx)
     ns = lookup(A, Neuron)
     n = sqrt(length(ns)) |> Int
-    ns = WorkingRegime.python_reshape(ns, n, n)
+    ns = WRCircuit.python_reshape(ns, n, n)
     δx = dx / n
     x = range(δx / 2, dx, step = δx)
     idxs = ToolsArray(Matrix{eltype(ns)}(undef, n, n),

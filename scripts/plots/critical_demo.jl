@@ -6,16 +6,16 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 using Bootstrap
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin # ! No determinism here unless running on CPU!!
-    model = WorkingRegime.models.Spatial
+    model = WRCircuit.models.Spatial
     begin # FNS parameters
         rho = 20000
         dx = 0.5
@@ -61,15 +61,15 @@ begin
                     nu,
                     n_ext,
                     Delta_g_K,
-                    key = WorkingRegime.PRNGKey(52))
+                    key = WRCircuit.PRNGKey(52))
 
     # monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
-    # stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
-    #                   "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10))
+    # stat_funcs = Dict("rate" => WRCircuit.stats.firing_rate,
+    #                   "susceptibility" => WRCircuit.stats.susceptibility(bin = 10))
 end
 
 begin # * Run simulation
-    # WorkingRegime.brainpy.math.random.seed(52) # ! This is broken.....
+    # WRCircuit.brainpy.math.random.seed(52) # ! This is broken.....
     m = model(; fixed_params...) # Key here is broken too... why...
     x = bpsolve(m, tmax; populations = [:E], vars = [:spike, :V, :input],
                 transient = tmin) # :I

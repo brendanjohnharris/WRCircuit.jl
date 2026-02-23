@@ -6,8 +6,8 @@ exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
-WorkingRegime.@preamble
+using WRCircuit
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 model = models.balanced.FNSPopulations

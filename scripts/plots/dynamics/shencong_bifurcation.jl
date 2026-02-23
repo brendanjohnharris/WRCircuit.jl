@@ -6,14 +6,14 @@ exec $HOME/build/julia-1.11.2/bin/julia -t auto --startup-file=no --color=yes "$
 # $HOME/build/julia-1.11.2/bin/julia maybe
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.WorkingRegime
-    modelname = "WorkingRegime"
+    model = models.WRCircuit
+    modelname = "WRCircuit"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -47,7 +47,7 @@ end
 begin
     stats = map(nus) do nu
         @info "Simulating for nu = $nu"
-        WorkingRegime.clear_live_arrays()
+        WRCircuit.clear_live_arrays()
         m = model(; key = jax.random.PRNGKey(42),
                   parameters..., nu)
         brainpy.reset_state(m)
@@ -82,7 +82,7 @@ begin
                 λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
                 λ = uconvert.(u"Hz", mean(λ))
             end
-            # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
+            # WRCircuit.clear_live_arrays() # Does this operate @everywhere? Seems not
             return ToolsArray([χ, λ], (Dim{:statistic}([:χ, :λ]),)) # Can only return non-python objects
         end |> stack
     end

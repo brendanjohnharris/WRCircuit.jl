@@ -5,13 +5,13 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = WorkingRegime.models.Nonspatial
+    model = WRCircuit.models.Nonspatial
     begin
         N_e = 2000
         J_e = 0.0008 # Microsiemens
@@ -32,12 +32,12 @@ begin
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
 
     monitors = ("E.spike",)#, "E.V", "E.input")
-    stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
-                      "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
-                      "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
-                      #   "temporal_average" => WorkingRegime.stats.temporal_average,
-                      #   "grand_distribution" => WorkingRegime.stats.grand_distribution(n_bins = 1000),
-                      "mua" => WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt))))
+    stat_funcs = Dict("rate" => WRCircuit.stats.firing_rate,
+                      "susceptibility" => WRCircuit.stats.susceptibility(bin = 10),
+                      "spike_spectrum" => WRCircuit.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => WRCircuit.stats.temporal_average,
+                      #   "grand_distribution" => WRCircuit.stats.grand_distribution(n_bins = 1000),
+                      "mua" => WRCircuit.stats.mua(bin = ustrip(to_ms(mua_dt))))
 
     metadata = (; mua_dt, tmax, tmin, monitors)
 end
@@ -47,19 +47,19 @@ begin# * Generate dict of parameter vectors
     pvals = stack(Iterators.product(values(sweep)...), dims = 1)
     sweep_params = Dict{String, Any}(zip(pnames, eachcol(pvals))) # Now a good shape for jax
     n_iters = length(first(values(sweep_params)))
-    jax_keys = WorkingRegime.jax.random.split(WorkingRegime.jax.random.PRNGKey(42), n_iters)
-    sweep_params["key"] = WorkingRegime.numpy.array.(jax_keys) # * So that each run is independent
+    jax_keys = WRCircuit.jax.random.split(WRCircuit.jax.random.PRNGKey(42), n_iters)
+    sweep_params["key"] = WRCircuit.numpy.array.(jax_keys) # * So that each run is independent
 end
 begin # * Create sweep function
-    run = WorkingRegime.stats.create_run(model, pydict(fixed_params), monitors,
-                                         ustrip(to_ms(tmax)),
-                                         ustrip(to_ms(tmin)))
-    stats_run = WorkingRegime.stats.create_stats_run(run, pydict(stat_funcs))
+    run = WRCircuit.stats.create_run(model, pydict(fixed_params), monitors,
+                                     ustrip(to_ms(tmax)),
+                                     ustrip(to_ms(tmin)))
+    stats_run = WRCircuit.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = WorkingRegime.stats.progress_vmap(stats_run, batch_size = 10)(pydict(sweep_params))
+    stats, sweep_parameters = WRCircuit.stats.progress_vmap(stats_run, batch_size = 10)(pydict(sweep_params))
 end
 begin
-    WorkingRegime.stats.save("nonspatial_sweep.pickle",
-                             (stats, sweep_params, fixed_params, metadata))
+    WRCircuit.stats.save("nonspatial_sweep.pickle",
+                         (stats, sweep_params, fixed_params, metadata))
 end

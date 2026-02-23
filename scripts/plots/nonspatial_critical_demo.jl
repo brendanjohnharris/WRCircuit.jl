@@ -5,14 +5,14 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = WorkingRegime.models.Nonspatial
+    model = WRCircuit.models.Nonspatial
     begin
         N_e = 2000
         nu = 10.0
@@ -86,9 +86,9 @@ end
 # end
 
 begin # * MUA spectrum
-    rates = WorkingRegime.compute_rates(spikes, 50u"ms")
+    rates = WRCircuit.compute_rates(spikes, 50u"ms")
     mdt = 3.0u"ms"
-    mua = groupby(spikes, 𝑡 => Base.Fix2(WorkingRegime.group_dt, mdt))
+    mua = groupby(spikes, 𝑡 => Base.Fix2(WRCircuit.group_dt, mdt))
     mua = map(mua) do r
         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
     end |> stack

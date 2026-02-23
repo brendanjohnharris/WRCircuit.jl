@@ -5,12 +5,12 @@ exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Random
 using SparseArrays
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin # * Sampling parameters
@@ -19,8 +19,8 @@ begin # * Sampling parameters
 end
 
 begin # * Fixed parameters
-    model = WorkingRegime.models.Spatial
-    default_params = WorkingRegime.defaults(model)
+    model = WRCircuit.models.Spatial
+    default_params = WRCircuit.defaults(model)
 
     tmax = 35u"s"
     transient = 5u"s" # The transient. Simulations always begin at 0
@@ -28,9 +28,9 @@ begin # * Fixed parameters
     rho = default_params[:parameters][:rho]
 
     monitors = ["E.spike", "E.input"] |> pytuple
-    stat_funcs = Dict("monitor" => WorkingRegime.stats.monitor)
+    stat_funcs = Dict("monitor" => WRCircuit.stats.monitor)
 
-    dt = pyconvert(Float32, WorkingRegime.brainpy.share["dt"]) * u"ms"
+    dt = pyconvert(Float32, WRCircuit.brainpy.share["dt"]) * u"ms"
     metadata = (; tmax, transient, monitors, dt)
 end
 
@@ -66,7 +66,7 @@ begin# * Run simulation
 
         @debug "Creating keys..."
         keys = rand(UInt32, length(_params))
-        jax_keys = WorkingRegime.jax.numpy.stack([WorkingRegime.PRNGKey(k) for k in keys])
+        jax_keys = WRCircuit.jax.numpy.stack([WRCircuit.PRNGKey(k) for k in keys])
         # # ? Important, must be python array
 
         @debug "Creating params..."
@@ -75,16 +75,16 @@ begin# * Run simulation
         params = (; (k => getfield.(_params, k) for k in keys)..., key = jax_keys)
 
         @debug "Creating runner..."
-        runner = WorkingRegime.create_run(model; monitors, tmax, transient)
+        runner = WRCircuit.create_run(model; monitors, tmax, transient)
 
         @debug "Creating stats_run..."
-        stats_run = WorkingRegime.create_stats_run(runner, stat_funcs)
+        stats_run = WRCircuit.create_stats_run(runner, stat_funcs)
 
         @debug "Running partial_vmap..."
-        stats, sweep_parameters = WorkingRegime.partial_vmap(stats_run)(params)
+        stats, sweep_parameters = WRCircuit.partial_vmap(stats_run)(params)
 
         @debug "Formatting results..."
-        res = WorkingRegime.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
+        res = WRCircuit.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
 
         @debug "Processing individual params..."
         for i in eachindex(_params)

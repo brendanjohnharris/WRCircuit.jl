@@ -6,12 +6,12 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 using Bootstrap
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
@@ -27,8 +27,8 @@ end
 
 # begin # * Animate
 #     @info "Animating rates"
-#     rates = WorkingRegime.compute_rates(spikes, 50u"ms")
-#     WorkingRegime.animate_rates(rates, dx; filename = "critical_demo.mp4")
+#     rates = WRCircuit.compute_rates(spikes, 50u"ms")
+#     WRCircuit.animate_rates(rates, dx; filename = "critical_demo.mp4")
 # end
 
 begin
@@ -100,7 +100,7 @@ end
 
 begin # * Fano factor
     @info "Calculating Fano factor"
-    dt = WorkingRegime.bpdt()
+    dt = WRCircuit.bpdt()
     τs = logrange(dt * 10, 1000 |> ustrip, length = 200) # ms
     fano = fano_factor(ustripall(spikes), τs)
     # fano = fano[𝑡 = 1..1000]
@@ -144,7 +144,7 @@ end
 #     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 100]
 #     # s = _s[2:end, 2000] |> ustripall
 
-#     ls = WorkingRegime.log10spectrum(s)
+#     ls = WRCircuit.log10spectrum(s)
 #     params = fit_oneoneff(ls; n_peaks = 2, w = 10)
 #     params = fit_oneoneff(ls, params)
 
@@ -209,7 +209,7 @@ end
 
 # begin # * MUA spectrum
 #     mdt = 2.0u"ms"
-#     mua = groupby(spikes, 𝑡 => Base.Fix2(WorkingRegime.group_dt, mdt))
+#     mua = groupby(spikes, 𝑡 => Base.Fix2(WRCircuit.group_dt, mdt))
 #     mua = map(mua) do r
 #         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
 #     end |> stack

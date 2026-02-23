@@ -3,19 +3,19 @@
 #=
 exec julia -t auto --startup-file=no --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# ENV["WORKINGREGIME_BACKEND"] = "cpu" # ! This does nothing if set here...
+# ENV["WRCircuit_BACKEND"] = "cpu" # ! This does nothing if set here...
 # ENV["CUDA_VISIBLE_DEVICES"] = ""
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using Suppressor
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = models.WorkingRegime
-    modelname = "WorkingRegime"
+    model = models.WRCircuit
+    modelname = "WRCircuit"
 
     begin # Shencong Parameters
         delta = 0.007 # Grid spacing
@@ -93,12 +93,12 @@ end
 # xs = range.(0 .+ dx / 2, domain .- dx / 2, N)
 
 # begin
-#     addprocs(1; env = ["WORKINGREGIME_BACKEND" => "cpu", "CUDA_VISIBLE_DEVICES" => ""])
+#     addprocs(1; env = ["WRCircuit_BACKEND" => "cpu", "CUDA_VISIBLE_DEVICES" => ""])
 #     @everywhere ENV["JULIA_CONDAPKG_OFFLINE"] = true
 #     # @everywhere ENV["TF_CPP_MIN_LOG_LEVEL"] = 0
 #     # @everywhere ENV["JAX_PLATFORM_NAME"] = "cpu"
-#     @everywhere ENV["WORKINGREGIME_BACKEND"] = "cpu" # Does not seem to work after startup
-#     @everywhere using WorkingRegime
+#     @everywhere ENV["WRCircuit_BACKEND"] = "cpu" # Does not seem to work after startup
+#     @everywhere using WRCircuit
 #     @everywhere using JLD2
 #     @everywhere jax.default_device = jax.devices("cpu")[0]
 #     @everywhere brainpy.math.set_platform("cpu")
@@ -112,11 +112,11 @@ begin
     conn = m.get_connectivity() # * Now how to copy this over without running into non-hashable type issues?
     out = pmap(deltas) do delta
         @info "δ = $delta"
-        m̂ = models.WorkingRegime(; key = jax.random.PRNGKey(42),
-                                  kernel = distances.ExponentialKernel,
-                                  parameters...,
-                                  delta,
-                                  copy_conn = conn)
+        m̂ = models.WRCircuit(; key = jax.random.PRNGKey(42),
+                              kernel = distances.ExponentialKernel,
+                              parameters...,
+                              delta,
+                              copy_conn = conn)
         res = bpsolve(m̂, T; populations = [:E], vars = [:spike], transient)
         N = m̂.E.size |> convert2(Vector)
         spikes = res[Var = At(:spike)][Population = At(:E)]
@@ -133,7 +133,7 @@ begin
             λ = sum(spikes, dims = 𝑡) ./ duration(spikes)
             λ = uconvert.(u"Hz", mean(λ))
         end
-        # WorkingRegime.clear_live_arrays() # Does this operate @everywhere? Seems not
+        # WRCircuit.clear_live_arrays() # Does this operate @everywhere? Seems not
         return χ, λ # Can only return non-python objects
     end
 end

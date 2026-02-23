@@ -433,7 +433,7 @@ println("""
 #    ```julia
 #    function neural_simulator(params)
 #        K_ee, K_ei, nu = params.K_ee, params.K_ei, params.nu
-#        m = WorkingRegime.models.Nonspatial(; N_e=2000, K_ee, K_ei, nu, ...)
+#        m = WRCircuit.models.Nonspatial(; N_e=2000, K_ee, K_ei, nu, ...)
 #        x = bpsolve(m, 5u"s"; populations=[:E, :I], vars=[:spike], transient=2u"s")
 #
 #        # Compute summary statistics

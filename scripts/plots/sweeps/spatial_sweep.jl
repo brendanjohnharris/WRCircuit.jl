@@ -5,18 +5,18 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.@quickactivate
-using WorkingRegime
+using WRCircuit
 using JLD2
 using LinearAlgebra
-WorkingRegime.@preamble
+WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    model = WorkingRegime.models.Spatial
+    model = WRCircuit.models.Spatial
     begin # FNS parameters
         # dx = 0.5
         # rho = 20000.0
-        # kernel = WorkingRegime.distances.GaussianKernel
+        # kernel = WRCircuit.distances.GaussianKernel
         # J_e = 0.0007
         # delta = 3.0
         # nu = 8.0
@@ -34,7 +34,7 @@ begin
 
         dx = 0.5
         rho = 20000.0
-        kernel = WorkingRegime.distances.ExponentialKernel
+        kernel = WRCircuit.distances.ExponentialKernel
         delta = 4.0
         nu = 4.5 # External population firing rate
         n_ext = 100  # Number of external synapses per Exc. neuron
@@ -58,10 +58,10 @@ begin
                     K_ee, K_ie, K_ei, K_ii)
 
     mua_dt = 2u"ms" # Gives mua spectrum max freq of 250 Hz
-    mua_func = WorkingRegime.stats.mua(bin = ustrip(to_ms(mua_dt)))
+    mua_func = WRCircuit.stats.mua(bin = ustrip(to_ms(mua_dt)))
 
     dn = round(Int, sqrt(rho * dx^2))
-    positions = WorkingRegime.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
+    positions = WRCircuit.positions.GridPositions((dx, dx))((dn, dn))  # Maybe think about capturing this somehow
     positions = map(positions) do pos
         map(pos) do p
             p.tolist() |> convert2(Float32)
@@ -85,25 +85,25 @@ begin
         dp = min.(dp, dx .- dp)
         norm(dp) < radius
     end # scatter(positions.|> Point2f, color=mask) to check
-    local_idxs = findall(mask) |> WorkingRegime.numpy.asarray
+    local_idxs = findall(mask) |> WRCircuit.numpy.asarray
 
     monitors = ["E.spike", ("E.input", local_idxs)] |> pytuple
-    stat_funcs = Dict("rate" => WorkingRegime.stats.firing_rate,
-                      "susceptibility" => WorkingRegime.stats.susceptibility(bin = 10),
-                      #   "radial_autocorrelation" => WorkingRegime.stats.radial_autocorrelation(positions,
+    stat_funcs = Dict("rate" => WRCircuit.stats.firing_rate,
+                      "susceptibility" => WRCircuit.stats.susceptibility(bin = 10),
+                      #   "radial_autocorrelation" => WRCircuit.stats.radial_autocorrelation(positions,
                       #                                                                    0.05))#,
-                      #   "efficiency" => WorkingRegime.stats.efficiency(bin_indices, 1000))
-                      # "spike_spectrum" => WorkingRegime.stats.spike_spectrum(n_segments = 10),
-                      #   "temporal_average" => WorkingRegime.stats.temporal_average,
-                      "grand_distribution" => WorkingRegime.stats.grand_distribution(n_bins = 1000),
+                      #   "efficiency" => WRCircuit.stats.efficiency(bin_indices, 1000))
+                      # "spike_spectrum" => WRCircuit.stats.spike_spectrum(n_segments = 10),
+                      #   "temporal_average" => WRCircuit.stats.temporal_average,
+                      "grand_distribution" => WRCircuit.stats.grand_distribution(n_bins = 1000),
                       "mua" => mua_func)
 
     metadata = (; positions, bin_indices, mua_dt, tmax, tmin, monitors)
 end
 begin# * Generate dict of parameter vectors
     n_repeats = 5 # The combination of key x other params will be unique
-    repeat_keys = WorkingRegime.jax.random.split(WorkingRegime.jax.random.PRNGKey(42),
-                                                 n_repeats)
+    repeat_keys = WRCircuit.jax.random.split(WRCircuit.jax.random.PRNGKey(42),
+                                             n_repeats)
 
     sweep = (;
              delta = range(2.5, 5.5, length = 16),
@@ -114,24 +114,24 @@ begin# * Generate dict of parameter vectors
     pvals = Iterators.product(values(sweep)...)
     sweep_params = zip(pnames, [getindex.(pvals, i) for i in eachindex(first(pvals))])
     sweep_params = Dict{String, Any}(sweep_params) # Now a good shape for jax
-    sweep_params["key"] = WorkingRegime.numpy.stack(WorkingRegime.numpy.array.(sweep_params["key"])) # * Required to be a fully python array
+    sweep_params["key"] = WRCircuit.numpy.stack(WRCircuit.numpy.array.(sweep_params["key"])) # * Required to be a fully python array
 end
 begin # * Create sweep function
-    run = WorkingRegime.stats.create_run(model, pydict(fixed_params), monitors,
-                                         ustrip(to_ms(tmax)),
-                                         ustrip(to_ms(tmin)))
-    stats_run = WorkingRegime.stats.create_stats_run(run, pydict(stat_funcs))
+    run = WRCircuit.stats.create_run(model, pydict(fixed_params), monitors,
+                                     ustrip(to_ms(tmax)),
+                                     ustrip(to_ms(tmin)))
+    stats_run = WRCircuit.stats.create_stats_run(run, pydict(stat_funcs))
 end
 begin # * Run simulation
-    stats, sweep_parameters = WorkingRegime.stats.progress_vmap(stats_run, batch_size = 4)(pydict(sweep_params))
+    stats, sweep_parameters = WRCircuit.stats.progress_vmap(stats_run, batch_size = 4)(pydict(sweep_params))
 end
 begin
-    WorkingRegime.stats.save("spatial_sweep.pickle",
-                             (stats, sweep_params, fixed_params, metadata))
+    WRCircuit.stats.save("spatial_sweep.pickle",
+                         (stats, sweep_params, fixed_params, metadata))
 end
 # if false
 #     begin # * Load stats
-#         load_stats, sweep_parameters, fixed_parameters, metadata = WorkingRegime.stats.load("WorkingRegime_better_bifurcation.pickle")
+#         load_stats, sweep_parameters, fixed_parameters, metadata = WRCircuit.stats.load("WRCircuit_better_bifurcation.pickle")
 #     end
 #     begin
 #         begin # * Extract a ToolsArray of one statistic
