@@ -42,8 +42,6 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [sources]
 MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl.git"}
 SimulationBasedInference = {rev = "main", url = "https://github.com/brendanjohnharris/SimulationBasedInference.jl"}
-TimeseriesBase = {path = "../../TimeseriesToolsBase.jl"}
-TimeseriesTools = {path = "../../TimeseriesTools.jl"}
 USydClusters = {rev = "main", url = "https://github.com/brendanjohnharris/UsydClusters.jl/"}
 
 [compat]
