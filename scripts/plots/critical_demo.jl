@@ -4,8 +4,8 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
+DrWatson.@quickactivate "WRCircuit"
 using Bootstrap
-DrWatson.@quickactivate
 using WRCircuit
 using JLD2
 using LinearAlgebra
@@ -13,6 +13,7 @@ using Optim
 using MoreMaps
 WRCircuit.@preamble
 set_theme!(foresight(:physics))
+outfile = datadir("critical_demo.jld2")
 
 begin # ! No determinism here unless running on CPU!!
     model = WRCircuit.models.Spatial
@@ -87,7 +88,7 @@ begin # * Run simulation
             p.tolist() |> convert2(Float32)
         end
     end
-    tagsave(datadir("critical_demo.jld2"),
+    tagsave(outfile,
             Dict("x" => x,
                  "fixed_params" => fixed_params,
                  "epositions" => epositions,

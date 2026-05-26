@@ -4,18 +4,19 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
+DrWatson.@quickactivate "WRCircuit"
 using Bootstrap
-DrWatson.@quickactivate
 using WRCircuit
 using JLD2
 using LinearAlgebra
 using Optim
 using MoreMaps
+using ForwardDiff
 WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
 begin
-    x = load(datadir("critical_demo.jld2"), "x")
+    x = load(datadir("critical_demo_#1.jld2"), "x")
     fixed_params = load(datadir("critical_demo.jld2"), "fixed_params")
     epositions = load(datadir("critical_demo.jld2"), "epositions")
     ipositions = load(datadir("critical_demo.jld2"), "ipositions")
@@ -384,7 +385,11 @@ function fit_mads(s::AbstractVector; components, peaks, tau_range)
 end
 function fit_mads(s::AbstractMatrix; kwargs...)
     map(eachcol(s)) do v
-        fit_mads(v; kwargs...)
+        try
+            fit_mads(v; kwargs...)
+        catch
+            return NaN
+        end
     end
 end
 
@@ -523,13 +528,73 @@ begin # * Statistics
 
             println(f, "-- MAD fit --")
             m = map(mad_fits[v]) do x
-                x.m.params.components.β |> first
+                if x isa Number # ie nan
+                    return x
+                else
+                    x.m.params.components.β |> first
+                end
             end
             stat = TimeseriesTools.bootstrapmedian(m)
             write(f, "$(stat)\n")
         end
     end
 end
+begin # * Save pre-computed curves for combined plotting
+    @info "Saving pre-computed circuit curves"
+
+    # Input MAD
+    input_mad = mads.input |> ustripall
+    input_mad_median = median(input_mad, dims = 2)
+    input_mad_median = dropdims(input_mad_median, dims = 2)
+    input_mad_fit = mad_fit.input
+    input_mad_exponent = input_mad_fit.m.params.components.β |> first
+    input_mad_exponents = map(mad_fits.input) do x
+        x.m.params.components.β |> first
+    end
+
+    # Input PSD
+    input_psd = spectra.input |> ustripall
+    input_psd_median = median(input_psd, dims = 2)
+    input_psd_median = dropdims(input_psd_median, dims = 2)
+    input_psd_median = input_psd_median[𝑓 = 1 .. 1000]
+    input_psd_fit = spectrum_fit.input
+    input_psd_exponent = input_psd_fit.m.params.components.β |> last
+    input_psd_exponents = map(spectrum_fits.input) do x
+        x.m.params.components.β |> last
+    end
+
+    # Fano factor (median across neurons)
+    fano_median = median(fano, dims = 2)
+    fano_median = dropdims(fano_median, dims = 2)
+    fano_exponent = median(mfano)
+    fano_exponents = collect(mfano)
+
+    circuit_curves = (;
+                      mad = (;
+                             t = collect(lookup(input_mad_median, 𝑡)),
+                             mu = collect(input_mad_median),
+                             fit_t = collect(lookup(input_mad_fit.s, 𝑡)),
+                             fit_vals = collect(input_mad_fit.fitted_s),
+                             exponent = input_mad_exponent,
+                             exponents = input_mad_exponents,),
+                      psd = (;
+                             f = collect(lookup(input_psd_median, 𝑓)),
+                             mu = collect(input_psd_median),
+                             fit_f = collect(lookup(input_psd_fit.fitted_s, 𝑓)),
+                             fit_vals = collect(input_psd_fit.fitted_s),
+                             exponent = input_psd_exponent,
+                             exponents = input_psd_exponents,),
+                      fano = (;
+                              t = collect(lookup(fano_median, 𝑡)),
+                              mu = collect(fano_median),
+                              exponent = fano_exponent,
+                              exponents = fano_exponents,),)
+
+    mkpath(datadir("plots"))
+    # jldsave(datadir("plots", "circuit_curves.jld2"); circuit_curves)
+    @info "Saved circuit curves to $(datadir("plots", "circuit_curves.jld2"))"
+end
+
 begin # * Supplementary figure: distribution of input distribution parameters
     sf = FourPanel()
     gs = subdivide(sf, 2, 2)
@@ -547,7 +612,7 @@ begin # * Supplementary figure: distribution of input distribution parameters
 end
 
 begin # * Additional properties: image and distribution fit
-    mf = FourPanel()
+    mf = TwoPanel(; size = (720, 324))
     myna = 27
     t = 18.3 * 10000 |> Int # Samples
     deltat = 0.117 * 10000 |> round |> Int # Samples
@@ -661,14 +726,15 @@ begin # * Additional properties: image and distribution fit
     # S = Stable(ps...)
     # lines!(ax, bins, pdf.(S, bins); color = crimson, linestyle = :dash)
 
-    begin # * Add input fits to main figure
+    sf = TwoPanel()
+    begin # * Add input fits to secondary figure
         v = :input
 
         s = spectrum_fit[v].s
         _s = spectrum_fit[v]._s
         fitted_s = spectrum_fit[v].fitted_s
         m = spectrum_fit[v].m
-        ax = Axis(mf[2, 1:2][1, 2]; xscale = log10, yscale = log10, title = "Input PSD",
+        ax = Axis(sf[1, 2]; xscale = log10, yscale = log10, title = "Input PSD",
                   xlabel = "Frequency (Hz)",
                   limits = ((1, 1000), nothing),
                   yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks)
@@ -684,7 +750,7 @@ begin # * Additional properties: image and distribution fit
         # _s = mad_fit[v]._s
         fitted_s = mad_fit[v].fitted_s
         m = mad_fit[v].m
-        ax = Axis(mf[2, :][1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
+        ax = Axis(sf[1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
                   xlabel = "Time lag (s)")
         lines!(ax, s; color = cornflowerblue)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
@@ -696,7 +762,7 @@ begin # * Additional properties: image and distribution fit
     end
 
     begin # * Fano plot
-        ax = Axis(mf[2, :][1, 3]; xlabel = "Window size (s)",
+        ax = Axis(sf[1, 3]; xlabel = "Window size (s)",
                   title = "Fano factor", xscale = log10, yscale = log10,
                   yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks)
 
@@ -803,7 +869,6 @@ begin # * Additional properties: image and distribution fit
 
     colsize!(gg, 1, Relative(0.75))
     colsize!(g, 1, Relative(0.35))
-    rowsize!(mf.layout, 2, Relative(0.4))
 
     display(mf)
     wsave(plotdir("critical_demo", "key_properties.pdf"), mf)
