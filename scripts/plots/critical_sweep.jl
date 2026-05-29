@@ -3,6 +3,18 @@
 #=
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
+# Critical sweep — exponent extraction.
+#
+# Load every (δ, Δg_K) simulation in data/critical_sweep, fit the per-neuron
+# diffusion exponent (from the input MAD) and spectral exponent (from the input
+# PSD), and save *all* per-neuron exponents (not neuron-averages) to
+# data/plots/critical_sweep.jld2.
+#
+# The fitting recipe follows scripts/plots/_critical_sweep.jl: the diffusion
+# exponent is the first component of a 2-component MAPPLE fit to the MAD curve;
+# the spectral exponent is the last component of a 1-component fit to the
+# 10-1000 Hz PSD.
+
 using DrWatson
 DrWatson.@quickactivate
 using WRCircuit
@@ -14,144 +26,120 @@ using Statistics
 WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
-begin # * Load sweep parameters
+# Neurons to fit per cell. 1 = every neuron ("all exponents"); the prototype
+# used 50 purely for speed. Bump this if the full fit is too slow.
+const neuron_step = 50
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-neuron exponent fits
+# ──────────────────────────────────────────────────────────────────────────────
+
+"Diffusion exponents (one per neuron): first component of a 2-component MAPPLE fit to MAD."
+function diffusion_exponents(mad; step = neuron_step)
+    return map(eachcol(mad[:, 1:step:end])) do y
+        try
+            y = ustripall(y)
+            m = fit(MAPPLE, y; components = 2, peaks = 0)
+            fit!(m, y)
+            return first(m.params.components.β)
+        catch
+            return NaN
+        end
+    end
+end
+
+"Spectral exponents (one per neuron): last component of a 1-component MAPPLE fit to the 10-1000 Hz PSD."
+function spectral_exponents(psd; step = neuron_step)
+    return map(eachcol(psd[:, 1:step:end])) do y
+        try
+            _p = y[𝑓 = 10u"Hz" .. 1000u"Hz"]
+            _p = logsample(ustripall(_p))
+            m = fit(MAPPLE, _p; components = 1, peaks = 0)
+            fit!(m, _p)
+            return last(m.params.components.β)
+        catch
+            return NaN
+        end
+    end
+end
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Assemble the full (δ, Δg_K) grid of files
+# ──────────────────────────────────────────────────────────────────────────────
+
+begin # * Load sweep parameters (mirrors _critical_sweep.jl, but the full grid)
     files = readdir(datadir("critical_sweep"), join = true)
-    ps = map(f -> parse_savename(f; connector = string(connector))[2], files)
+    ps = map(files) do f
+        fname = parse_savename(f; connector = string(connector))[2]
+        if haskey(fname, "key") || !haskey(fname, "delta") || !haskey(fname, "Delta_g_K")
+            return nothing
+        else
+            return fname
+        end
+    end
+    keep = .!isnothing.(ps)
+    files = files[keep]
+    ps = ps[keep]
+
     deltas = [p["delta"] for p in ps]
-end
+    Delta_g_Ks = [p["Delta_g_K"] for p in ps]
 
-begin # * Load PSD data
-    psd = map(Chart(Threaded(), ProgressLogger()), files) do f
-        load(f, "inputs/psd")
+    # Sorted lookups so the saved grid (and any heatmap) is monotonic in both axes
+    udelta = sort(unique(deltas))
+    ugk = sort(unique(Delta_g_Ks))
+
+    parameter_grid = Iterators.product(
+        Dim{:delta}(udelta),
+        Dim{:Delta_g_K}(ugk)
+    ) |> collect
+    parameter_grid = map(parameter_grid) do (d, gk)
+        idx = findfirst((deltas .== d) .& (Delta_g_Ks .== gk))
+        isnothing(idx) ? nothing : files[idx]
     end
-    psd = ToolsArray(psd, Dim{:δ}(deltas)) |> stack
+    @info "Found $(count(!isnothing, parameter_grid)) / $(length(parameter_grid)) grid cells"
 end
 
-begin # * Plot Psd for one delta
-    p = median(psd[δ = Near(4.0)], dims = Neuron)
-    p = dropdims(p, dims = Neuron)
+# ──────────────────────────────────────────────────────────────────────────────
+# Fit exponents across the grid (one pass; missing cells -> empty vectors)
+# ──────────────────────────────────────────────────────────────────────────────
 
-    # * MAPPLE fit
-    fmax = 1000
-    _p = p[𝑓 = 10u"Hz" .. fmax * u"Hz"]
-    _p = logsample(ustripall(_p))
-    m = fit(MAPPLE, _p; components = 1, peaks = 1)
-    fit!(m, _p)
-    _m = predict(m, lookup(_p, 𝑓))
-
-    f = Figure()
-    ax = Axis(f[1, 1]; xscale = log10, yscale = log10)
-    lines!(ax, ustripall(p)[𝑓 = eps() .. fmax])
-    lines!(ax, lookup(_p, 𝑓), _m)
-    display(f)
-    display(m.params.components)
-end
-
-begin # * And mad
-    mad = map(Chart(Threaded(), ProgressLogger()), files) do f
-        load(f, "inputs/mad")
+begin # * Diffusion exponents
+    a = map(Chart(Threaded(), ProgressLogger()), parameter_grid) do f
+        isnothing(f) && return Float64[]
+        try
+            return diffusion_exponents(load(f, "inputs/mad"))
+        catch err
+            @warn "Failed MAD fit for $f" err
+            return Float64[]
+        end
     end
-    mad = ToolsArray(mad, Dim{:δ}(deltas)) |> stack
 end
 
-begin # * Plot mad for one delta
-    p = median(mad[δ = Near(4.0)], dims = Neuron)
-    p = dropdims(p, dims = Neuron) |> ustripall
-
-    # * MAPPLE fit
-    m = fit(MAPPLE, p; components = 2, peaks = 0)
-    fit!(m, p)
-    _m = predict(m, lookup(p, 𝑡))
-
-    f = Figure()
-    ax = Axis(f[1, 1]; xscale = log10, yscale = log10)
-    lines!(ax, ustripall(p))
-    lines!(ax, lookup(p, 𝑡), _m)
-    display(f)
-    display(m.params.components)
-end
-
-function susceptibility(x; dt = 100u"ms")
-    # * First bin into ms bins
-    X = groupby(x, 𝑡 => Base.Fix2(WRCircuit.group_dt, dt))
-
-    # * Active neurons
-    X = map(X) do x
-        sum(x, dims = 𝑡) .> 0
+begin # * Spectral exponents
+    b = map(Chart(Threaded(), ProgressLogger()), parameter_grid) do f
+        isnothing(f) && return Float64[]
+        try
+            return spectral_exponents(load(f, "inputs/psd"))
+        catch err
+            @warn "Failed PSD fit for $f" err
+            return Float64[]
+        end
     end
-
-    # * Fraction of active neurons at each time step
-    rho = mean.(X)
-
-    # * Susceptibility
-    chi = mean(rho .^ 2) - mean(rho)^2
 end
 
-begin # * Calculate susceptibility
-    spikes = map(Chart(Threaded(), ProgressLogger()), files) do f
-        load(f, "spikes")
-    end
-    χ = map(susceptibility, Chart(Threaded(), ProgressLogger()), spikes)
-    χ = ToolsArray(χ, Dim{:δ}(deltas)) |> stack
+# ──────────────────────────────────────────────────────────────────────────────
+# Save (per-neuron exponents only, plus the parameter lookups)
+# ──────────────────────────────────────────────────────────────────────────────
+
+begin # * Save
+    mkpath(datadir("plots"))
+    out = Dict(
+        "a" => a,            # per-neuron diffusion exponents, ToolsArray{Vector} over (δ, Δg_K)
+        "b" => b,            # per-neuron spectral exponents
+        "delta" => udelta,
+        "Delta_g_K" => ugk
+    )
+    outfile = datadir("plots", "critical_sweep.jld2")
+    tagsave(outfile, out)
+    @info "Saved $outfile"
 end
-begin
-    lines(χ)
-end
-
-# begin # * Load distribution
-#     distribution = map(Chart(Threaded(), ProgressLogger()), files) do f
-#         load(f, "inputs/distribution")
-#     end
-#     distribution = ToolsArray(distribution, Dim{:δ}(deltas)) |> stack
-# end
-# begin # * Plot typical distribution
-#     p = distribution[δ = Near(4.0)][:, 1600][:]
-
-#     μ = median(p)
-#     σ = (quantile(p, 0.75) - quantile(p, 0.25)) / 1.349
-
-#     d = fit(Stable, ustripall(p))
-#     d |> display
-#     # d = Normal(μ, σ)
-
-#     f = Figure()
-#     ax = Axis(f[1, 1], limits = ((-1, 1), nothing),
-#               title = "μ = $(round(μ; sigdigits=3)), σ = $(round(σ; sigdigits=3))")
-#     hist!(ax, ustripall(p); bins = -2:0.01:2, normalization = :pdf)
-#     lines!(ax, -2:0.01:2, pdf.([d], -2:0.01:2); color = :red)
-#     display(f)
-# end
-# begin # * log plot
-#     _p = abs.(p .- median(p))
-#     bins = 0.01:0.01:2
-
-#     f = Figure()
-#     ax = Axis(f[1, 1]; yscale = log10, xscale = log10, limits = (nothing, (1e-2, nothing)))
-#     hist!(ax, _p; bins = bins, normalization = :pdf)
-#     _d = fit(Stable, vcat(_p[1:5:end], .-_p[1:5:end]))
-#     lines!(ax, bins, pdf.([_d], bins) .* 2; color = :red)
-#     display(f)
-# end
-# begin # Plot distribution of fits across neurons
-#     ps = map(Chart(Threaded(), ProgressLogger()),
-#              eachslice(distribution[δ = Near(4.0)], dims = Neuron)) do p
-#         d = fit(Stable, ustripall(p))
-#     end
-#     αs = getfield.(ps, :α)
-#     βs = getfield.(ps, :β)
-#     μs = getfield.(ps, :μ)
-#     σs = getfield.(ps, :σ)
-# end
-# begin # * Histogram across neurons
-#     f = FourPanel()
-#     gs = subdivide(f, 2, 2)
-
-#     for (i, p) in enumerate([:α, :β, :σ, :μ])
-#         x = getfield.(ps, p)
-#         m = median(x)
-#         ax = Axis(gs[i]; title = "$p median = $(round(m; sigdigits=3))")
-#         hist!(ax, x; bins = 50, normalization = :pdf)
-#         vlines!(ax, [m], color = :red)
-#     end
-#     display(f)
-# end # !!! Maybe calculate a geometric median over these four parameters to get a better idea of the 'average neuron'

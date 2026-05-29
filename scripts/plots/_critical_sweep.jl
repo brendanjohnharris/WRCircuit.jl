@@ -28,9 +28,11 @@ begin # * Load sweep parameters
     filter!(!isnothing, ps)
     deltas = [p["delta"] for p in ps]
     Delta_g_Ks = [p["Delta_g_K"] for p in ps]
-    parameter_grid = Iterators.product(Dim{:delta}(deltas |> unique),
-                                       Dim{:Delta_g_K}(Delta_g_Ks |> unique)) |>
-                     collect
+    parameter_grid = Iterators.product(
+        Dim{:delta}(deltas |> unique),
+        Dim{:Delta_g_K}(Delta_g_Ks |> unique)
+    ) |>
+        collect
     parameter_grid = map(parameter_grid) do (d, gk)
         idx = findfirst((deltas .== d) .& (Delta_g_Ks .== gk))
         if isnothing(idx)
@@ -66,7 +68,7 @@ begin # * Plot Psd for one delta
     p = dropdims(p, dims = Neuron)
 
     f = Figure()
-    ax = Axis(f[1, 1]; yscale = log10)#, xscale = log10)
+    ax = Axis(f[1, 1]; yscale = log10) #, xscale = log10)
     lines!(ax, ustripall(p)[𝑓 = eps() .. 150])
     display(f)
 end
@@ -79,8 +81,10 @@ if false # * Plot psd heatmap over deltas
 
     p = p ./ p[:, 1]
 
-    ax = Axis(f[1, 1];
-              xlabel = "Frequency (Hz)", ylabel = "Delta")
+    ax = Axis(
+        f[1, 1];
+        xlabel = "Frequency (Hz)", ylabel = "Delta"
+    )
     heatmap!(ax, ustripall(p); colorscale = log10)
     display(f)
 end
@@ -142,8 +146,10 @@ if false # * Plot mad heatmap over deltas
 
     p = p ./ p[:, 1]
 
-    ax = Axis(f[1, 1];
-              xlabel = "Frequency (Hz)", ylabel = "Delta")
+    ax = Axis(
+        f[1, 1];
+        xlabel = "Frequency (Hz)", ylabel = "Delta"
+    )
     heatmap!(ax, ustripall(p); colorscale = log10)
     display(f)
 end
@@ -217,23 +223,31 @@ end
 begin # * Plot mad and PSD over Delta_g_K on same plot
     f = TwoPanel()
 
-    ax1 = Axis(f[1, 1]; xlabel = "Delta", ylabel = "Diffusion exponent",
-               xgridvisible = false,
-               ygridvisible = false, title = "Δg_K = $(this_Delta_g_K)")
+    ax1 = Axis(
+        f[1, 1]; xlabel = "Delta", ylabel = "Diffusion exponent",
+        xgridvisible = false,
+        ygridvisible = false, title = "Δg_K = $(this_Delta_g_K)"
+    )
     scatterlines!(ax1, as, color = :cornflowerblue, markersize = 10)
-    ax2 = Axis(f[1, 1]; ylabel = rich("Spectral exponent", color = :crimson),
-               yaxisposition = :right,
-               xgridvisible = false, ygridvisible = false)
+    ax2 = Axis(
+        f[1, 1]; ylabel = rich("Spectral exponent", color = :crimson),
+        yaxisposition = :right,
+        xgridvisible = false, ygridvisible = false
+    )
     scatterlines!(ax2, bs, color = :crimson, markersize = 10)
     display(f)
 
-    gax1 = Axis(f[1, 2]; xlabel = "Δg_K", ylabel = "Diffusion exponent",
-                xgridvisible = false,
-                ygridvisible = false, title = "δ = $(this_delta)")
+    gax1 = Axis(
+        f[1, 2]; xlabel = "Δg_K", ylabel = "Diffusion exponent",
+        xgridvisible = false,
+        ygridvisible = false, title = "δ = $(this_delta)"
+    )
     scatterlines!(gax1, gk_as, color = :cornflowerblue, markersize = 10)
-    gax2 = Axis(f[1, 2]; ylabel = rich("Spectral exponent", color = :crimson),
-                yaxisposition = :right,
-                xgridvisible = false, ygridvisible = false)
+    gax2 = Axis(
+        f[1, 2]; ylabel = rich("Spectral exponent", color = :crimson),
+        yaxisposition = :right,
+        xgridvisible = false, ygridvisible = false
+    )
     scatterlines!(gax2, gk_bs, color = :crimson, markersize = 10)
 
     linkyaxes!(ax1, gax1)
@@ -271,8 +285,10 @@ end
 begin # * Heatmap of diffusion exponent over delta and Delta_g_K
     f = Figure()
     ax = Axis(f[1, 1]; xlabel = "δ", ylabel = "Δg_K")
-    h = heatmap!(ax, ustripall(full_as), colorrange = (0.5, 0.75), lowclip = :black,
-                 colormap = :turbo)
+    h = heatmap!(
+        ax, ustripall(full_as), colorrange = (0.5, 0.75), lowclip = :black,
+        colormap = :turbo
+    )
     Colorbar(f[1, 2], h; label = "Diffusion exponent")
     display(f)
 end
@@ -312,11 +328,15 @@ end
 begin # * Plot diffusion exponent vs spectral exponent
     f = Figure()
     ax = Axis(f[1, 1]; xlabel = "Diffusion exponent", ylabel = "Spectral exponent")
-    lines!(ax, collect(as), collect(bs), color = :cornflowerblue,
-           label = "δ sweep (Δg_K = $(this_Delta_g_K))")
+    lines!(
+        ax, collect(as), collect(bs), color = :cornflowerblue,
+        label = "δ sweep (Δg_K = $(this_Delta_g_K))"
+    )
 
-    p = lines!(ax, collect(gk_as), collect(gk_bs), color = :crimson,
-               label = "Δg_K sweep (δ = $(this_delta))")
+    p = lines!(
+        ax, collect(gk_as), collect(gk_bs), color = :crimson,
+        label = "Δg_K sweep (δ = $(this_delta))"
+    )
     axislegend(ax, position = :lt)
     display(f)
 end

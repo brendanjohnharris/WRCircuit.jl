@@ -30,11 +30,13 @@ begin # * Run a sample simulation at the working point (default values)
     tmin = 5u"s"
     model = WRCircuit.models.Spatial
 
-    m = model(;)
-    x = bpsolve(m, tmax;
-                populations = [:E],
-                vars = [:spike, :V, :input],
-                transient = tmin)
+    m = model()
+    x = bpsolve(
+        m, tmax;
+        populations = [:E],
+        vars = [:spike, :V, :input],
+        transient = tmin
+    )
 end
 
 begin # * Animate

@@ -10,6 +10,7 @@ using JLD2
 using LinearAlgebra
 using Random
 using SparseArrays
+using MoreMaps
 WRCircuit.@preamble
 set_theme!(foresight(:physics))
 
@@ -43,8 +44,10 @@ begin # And format parameters
 
     parameter_grid = Iterators.product(delta, Delta_g_K)
 
-    parameter_vector = [(; delta = d, Delta_g_K = gk)
-                        for (d, gk) in parameter_grid]
+    parameter_vector = [
+        (; delta = d, Delta_g_K = gk)
+            for (d, gk) in parameter_grid
+    ]
 
     if !isdir(path)
         mkpath(path)
@@ -60,7 +63,7 @@ begin
     sort!(parameter_vector; by = Base.Fix2(getindex, :Delta_g_K)) # Group by Delta_G_K
     batches = Iterators.partition(parameter_vector[:], batch_size)
 end
-begin# * Run simulation
+begin # * Run simulation
     for (j, _params) in enumerate(batches)
         @info "Batch $j / $(length(batches))"
 
@@ -102,12 +105,12 @@ begin# * Run simulation
                 # * MAD of inputs
                 τs = logrange(10, 10000, length = 100)
                 τs = unique(round.(Int, τs)) .* dt
-                mad = map(eachslice(x, dims = Neuron)) do _x
+                mad = map(Chart(Threaded()), eachslice(x, dims = Neuron)) do _x
                     madev(_x, τs)
                 end |> stack
 
                 # * PSD of inputs
-                psd = map(eachslice(x, dims = Neuron)) do _x
+                psd = map(Chart(Threaded()), eachslice(x, dims = Neuron)) do _x
                     _x = _x .- mean(_x)
                     spectrum(_x, 0.25)
                 end |> stack
@@ -116,16 +119,18 @@ begin# * Run simulation
                 # distribution = x[1:10:end, :]
             end
 
-            out = Dict("parameters" => merged_params,
-                       "spikes" => r.var"E.spike",
-                       "inputs/mad" => mad,
-                       "inputs/psd" => psd
-                       #    "inputs/distribution" => distribution
-                       )
-            tagsave(joinpath(path, filename), out)
+            out = Dict(
+                "parameters" => merged_params,
+                "spikes" => r.var"E.spike",
+                "inputs/mad" => mad,
+                "inputs/psd" => psd
+                #    "inputs/distribution" => distribution
+            )
+            wsave(joinpath(path, filename), out)
         end
 
         @debug "Batch $j complete"
+        WRCircuit.jax.clear_caches() # Does this work?
         flush(stderr)
         flush(stdout)
     end

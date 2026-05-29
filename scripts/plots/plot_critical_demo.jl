@@ -81,17 +81,21 @@ if :I ∈ lookup(x, Population)  # * Spike raster
 
     for (i, s) in enumerate(spike_times[elocal_idxs])
         idxs = s .∈ [intrvl]
-        scatter!(ax, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
-                 color = cucumber,
-                 markersize = 3)
+        scatter!(
+            ax, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
+            color = cucumber,
+            markersize = 3
+        )
     end
 
     ax2 = Axis(f[2, 1]; xlabel = "Time (ms)", ylabel = "Inhibitory", yticks = [NaN])
     for (i, s) in enumerate(spike_times[ilocal_idxs])
         idxs = s .∈ [intrvl]
-        scatter!(ax2, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
-                 color = crimson,
-                 markersize = 3)
+        scatter!(
+            ax2, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
+            color = crimson,
+            markersize = 3
+        )
     end
     # hidedecorations!(ax2)
     linkxaxes!(ax, ax2)
@@ -301,9 +305,13 @@ begin # * Plot the MSD and power spectrum, with fits, of the LFP, membrane poten
         num_row_blocks = div(size(_V, 2), block_size)
         num_col_blocks = div(size(_V, 3), block_size)
 
-        idxs = [((i * block_size + 1):((i + 1) * block_size),
-                 (j * block_size + 1):((j + 1) * block_size))
-                for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)]
+        idxs = [
+            (
+                    (i * block_size + 1):((i + 1) * block_size),
+                    (j * block_size + 1):((j + 1) * block_size),
+                )
+                for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)
+        ]
 
         LFP = map(idxs) do (i, j)
             m = _V[:, i, j] # * Get local patch
@@ -369,7 +377,7 @@ function fit_spectrums(s::AbstractVector; components, peaks, f_range)
     return (; m, s, fitted_s, _s)
 end
 function fit_spectrums(s::AbstractMatrix; kwargs...)
-    map(eachcol(s)) do v
+    return map(eachcol(s)) do v
         fit_spectrums(v; kwargs...)
     end
 end
@@ -384,7 +392,7 @@ function fit_mads(s::AbstractVector; components, peaks, tau_range)
     return (; m, s, fitted_s)
 end
 function fit_mads(s::AbstractMatrix; kwargs...)
-    map(eachcol(s)) do v
+    return map(eachcol(s)) do v
         try
             fit_mads(v; kwargs...)
         catch
@@ -433,34 +441,42 @@ if false
         fitted_s = fit_spectra[v].fitted_s
         m = fit_spectra[v].m
 
-        ax = Axis(gs[i, 1]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Frequency (Hz)", ylabel = "PSD")
+        ax = Axis(
+            gs[i, 1]; xscale = log10, yscale = log10, title = string(v),
+            xlabel = "Frequency (Hz)", ylabel = "PSD"
+        )
         lines!(ax, s; color = cornflowerblue, alpha = 0.4)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
         return ax
     end
     # linkaxes!(axs...)
 
     axs = map(enumerate(keys(vars))) do (i, v)
         s = fit_mads[v].s
-        _s = s#fit_mads[v]._s
+        _s = s #fit_mads[v]._s
         fitted_s = fit_mads[v].fitted_s
         m = fit_mads[v].m
 
-        ax = Axis(gs[i, 2]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Time lag (s)", ylabel = "MSD")
+        ax = Axis(
+            gs[i, 2]; xscale = log10, yscale = log10, title = string(v),
+            xlabel = "Time lag (s)", ylabel = "MSD"
+        )
         lines!(ax, s; color = cornflowerblue, alpha = 0.4)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
         return ax
     end
     # linkaxes!(axs...)
@@ -480,15 +496,19 @@ begin # * Individual statistics
         fitted_s = spectrum_fit[v].fitted_s
         m = spectrum_fit[v].m
 
-        ax = Axis(f[1, 1]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Frequency (Hz)", ylabel = "PSD")
+        ax = Axis(
+            f[1, 1]; xscale = log10, yscale = log10, title = string(v),
+            xlabel = "Frequency (Hz)", ylabel = "PSD"
+        )
         lines!(ax, s; color = cornflowerblue)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
         wsave(plotdir("critical_demo", "$(v)_spectrum.pdf"), f)
     end
 
@@ -502,15 +522,19 @@ begin # * Individual statistics
         fitted_s = mad_fit[v].fitted_s
         m = mad_fit[v].m
 
-        ax = Axis(f[1, 1]; xscale = log10, yscale = log10, title = string(v),
-                  xlabel = "Time lag (s)")
+        ax = Axis(
+            f[1, 1]; xscale = log10, yscale = log10, title = string(v),
+            xlabel = "Time lag (s)"
+        )
         lines!(ax, s; color = cornflowerblue)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
         wsave(plotdir("critical_demo", "$(v)_mad.pdf"), f)
     end
 end
@@ -570,25 +594,29 @@ begin # * Save pre-computed curves for combined plotting
     fano_exponents = collect(mfano)
 
     circuit_curves = (;
-                      mad = (;
-                             t = collect(lookup(input_mad_median, 𝑡)),
-                             mu = collect(input_mad_median),
-                             fit_t = collect(lookup(input_mad_fit.s, 𝑡)),
-                             fit_vals = collect(input_mad_fit.fitted_s),
-                             exponent = input_mad_exponent,
-                             exponents = input_mad_exponents,),
-                      psd = (;
-                             f = collect(lookup(input_psd_median, 𝑓)),
-                             mu = collect(input_psd_median),
-                             fit_f = collect(lookup(input_psd_fit.fitted_s, 𝑓)),
-                             fit_vals = collect(input_psd_fit.fitted_s),
-                             exponent = input_psd_exponent,
-                             exponents = input_psd_exponents,),
-                      fano = (;
-                              t = collect(lookup(fano_median, 𝑡)),
-                              mu = collect(fano_median),
-                              exponent = fano_exponent,
-                              exponents = fano_exponents,),)
+        mad = (;
+            t = collect(lookup(input_mad_median, 𝑡)),
+            mu = collect(input_mad_median),
+            fit_t = collect(lookup(input_mad_fit.s, 𝑡)),
+            fit_vals = collect(input_mad_fit.fitted_s),
+            exponent = input_mad_exponent,
+            exponents = input_mad_exponents,
+        ),
+        psd = (;
+            f = collect(lookup(input_psd_median, 𝑓)),
+            mu = collect(input_psd_median),
+            fit_f = collect(lookup(input_psd_fit.fitted_s, 𝑓)),
+            fit_vals = collect(input_psd_fit.fitted_s),
+            exponent = input_psd_exponent,
+            exponents = input_psd_exponents,
+        ),
+        fano = (;
+            t = collect(lookup(fano_median, 𝑡)),
+            mu = collect(fano_median),
+            exponent = fano_exponent,
+            exponents = fano_exponents,
+        ),
+    )
 
     mkpath(datadir("plots"))
     # jldsave(datadir("plots", "circuit_curves.jld2"); circuit_curves)
@@ -600,11 +628,15 @@ begin # * Supplementary figure: distribution of input distribution parameters
     gs = subdivide(sf, 2, 2)
     map(enumerate([(:α, αs), (:β, βs), (:μ, μs), (:σ, σs)])) do (i, (name, data))
         m = median(data)
-        ax = Axis(gs[i]; title = "$(name): median=$(round(m, digits=2))",
-                  xlabel = string(name),
-                  ylabel = "Density")
-        ziggurat!(ax, data; bins = 20, normalization = :pdf,
-                  color = cornflowerblue)
+        ax = Axis(
+            gs[i]; title = "$(name): median=$(round(m, digits = 2))",
+            xlabel = string(name),
+            ylabel = "Density"
+        )
+        ziggurat!(
+            ax, data; bins = 20, normalization = :pdf,
+            color = cornflowerblue
+        )
         vlines!(ax, [m]; color = crimson, linestyle = :dash)
     end
     display(sf)
@@ -645,7 +677,7 @@ begin # * Additional properties: image and distribution fit
             total_weight = sum(weights)
 
             # Skip if total intensity is too small (avoid division by zero)
-            if total_weight < 1e-10
+            if total_weight < 1.0e-10
                 com_x[t] = nx / 2.0
                 com_y[t] = ny / 2.0
                 continue
@@ -688,20 +720,28 @@ begin # * Additional properties: image and distribution fit
     xs = dx .* xs ./ N
     ys = dx .* ys ./ N
 
-    ax = Axis(hg[1, 1]; xlabel = "X (mm)", ylabel = "Y (mm)",
-              limits = ((0, dx), (0, dx)), xticks = 0:0.25:0.5,
-              yticks = 0:0.25:0.5, xtickformat = terseticks,
-              ytickformat = terseticks)
+    ax = Axis(
+        hg[1, 1]; xlabel = "X (mm)", ylabel = "Y (mm)",
+        limits = ((0, dx), (0, dx)), xticks = 0:0.25:0.5,
+        yticks = 0:0.25:0.5, xtickformat = terseticks,
+        ytickformat = terseticks
+    )
 
-    h = heatmap!(ax, xx, xx, input_grid[t, :, :]';
-                 colormap = seethrough(reverse(sunrise)))
+    h = heatmap!(
+        ax, xx, xx, input_grid[t, :, :]';
+        colormap = seethrough(reverse(sunrise))
+    )
     lines!(ax, xs, ys; color = :white, linewidth = 3)
-    p = lines!(ax, xs, ys; color,
-               colormap = reverse(cgrad(:turbo)),
-               linewidth = 2)
+    p = lines!(
+        ax, xs, ys; color,
+        colormap = reverse(cgrad(:turbo)),
+        linewidth = 2
+    )
     Colorbar(hg[1, 2], h; label = "Input current (nA)")
-    Colorbar(hg[0, 1], p; vertical = false, label = "Time (s)",
-             tickformat = terseticks)
+    Colorbar(
+        hg[0, 1], p; vertical = false, label = "Time (s)",
+        tickformat = terseticks
+    )
 
     rowgap!(hg, 1, Relative(0.06))
     colgap!(hg, 1, Relative(0.05))
@@ -734,37 +774,47 @@ begin # * Additional properties: image and distribution fit
         _s = spectrum_fit[v]._s
         fitted_s = spectrum_fit[v].fitted_s
         m = spectrum_fit[v].m
-        ax = Axis(sf[1, 2]; xscale = log10, yscale = log10, title = "Input PSD",
-                  xlabel = "Frequency (Hz)",
-                  limits = ((1, 1000), nothing),
-                  yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks)
+        ax = Axis(
+            sf[1, 2]; xscale = log10, yscale = log10, title = "Input PSD",
+            xlabel = "Frequency (Hz)",
+            limits = ((1, 1000), nothing),
+            yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks
+        )
         lines!(ax, decompose(s)...; color = cornflowerblue)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s .* 0.7; color = crimson, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
 
         s = mad_fit[v].s
         # _s = mad_fit[v]._s
         fitted_s = mad_fit[v].fitted_s
         m = mad_fit[v].m
-        ax = Axis(sf[1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
-                  xlabel = "Time lag (s)")
+        ax = Axis(
+            sf[1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
+            xlabel = "Time lag (s)"
+        )
         lines!(ax, s; color = cornflowerblue)
         # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
         lines!(ax, fitted_s; color = crimson, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
-        text!(ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
-              align = (:left, :bottom))
+        text!(
+            ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
+            align = (:left, :bottom)
+        )
     end
 
     begin # * Fano plot
-        ax = Axis(sf[1, 3]; xlabel = "Window size (s)",
-                  title = "Fano factor", xscale = log10, yscale = log10,
-                  yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks)
+        ax = Axis(
+            sf[1, 3]; xlabel = "Window size (s)",
+            title = "Fano factor", xscale = log10, yscale = log10,
+            yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks
+        )
 
         sfano = deepcopy(fano)
         sfano = set(sfano, 𝑡 => times(sfano) ./ 1000) #uconvert(u"s", times(sfano))
@@ -779,17 +829,21 @@ begin # * Additional properties: image and distribution fit
 
         # * Plot each frequency break
         fstops = ma.params.components.log_f_stop |> collect .|> exp10
-        vlines!(ax, fstops[1:(end - 1)]; color = :gray,
-                linestyle = :dot)
+        vlines!(
+            ax, fstops[1:(end - 1)]; color = :gray,
+            linestyle = :dot
+        )
         prepend!(fstops, 1 / 1000)
         fstops[end] = maximum(dims(sfano, 𝑡))
         fcenters = fstops[1:(end - 1)] .+ diff(fstops) ./ 2
         for (fcenter, β) in zip(fcenters, ma.params.components.β)
             mean_fano = muf[𝑡 = Near(fcenter)] .* 1.2
             text = "c = $(round(β, digits = 2))"
-            text!(ax, fcenter .* 0.8, mean_fano; text,
-                  align = (:center, :bottom),
-                  fontsize = 12)
+            text!(
+                ax, fcenter .* 0.8, mean_fano; text,
+                align = (:center, :bottom),
+                fontsize = 12
+            )
         end
 
         # m.params.transition_width = 0.0
@@ -803,8 +857,10 @@ begin # * Additional properties: image and distribution fit
     end
 
     begin # * Short trace
-        axv1 = Axis(gg[1, 1]; title = "Membrane potential (mV)",
-                    yticks = WilkinsonTicks(3; k_max = 3), xlabel = "Time (s)")
+        axv1 = Axis(
+            gg[1, 1]; title = "Membrane potential (mV)",
+            yticks = WilkinsonTicks(3; k_max = 3), xlabel = "Time (s)"
+        )
         hlines!(axv1, [-50]; color = crimson)
         hlines!(axv1, [-70]; color = crimson, linestyle = :dash)
         hlines!(axv1, [mean(V)]; color = :gray, linestyle = :dash)
@@ -814,16 +870,20 @@ begin # * Additional properties: image and distribution fit
 
         nu = sum(spikes) ./ size(spikes, 2) ./ uconvert(u"s", duration(spikes)) |> ustrip
 
-        axislegend(axv1, [LineElement(color = :transparent, linestyle = nothing)],
-                   [L"\nu \approx %$(round(nu, digits=1)) \textrm{ Hz }"];
-                   position = :rb, framevisible = true, patchsize = (0.1, 0.1))
+        axislegend(
+            axv1, [LineElement(color = :transparent, linestyle = nothing)],
+            [L"\nu \approx %$(round(nu, digits=1)) \textrm{ Hz }"];
+            position = :rb, framevisible = true, patchsize = (0.1, 0.1)
+        )
     end
     begin # * Short trace
         vi = input
 
-        axvi1 = Axis(gg[2, 1]; title = "Input current (nA)",
-                     xlabel = "Time (s)", yticks = WilkinsonTicks(3; k_max = 3),
-                     limits = (nothing, (-1, 3)))
+        axvi1 = Axis(
+            gg[2, 1]; title = "Input current (nA)",
+            xlabel = "Time (s)", yticks = WilkinsonTicks(3; k_max = 3),
+            limits = (nothing, (-1, 3))
+        )
 
         # hlines!(ax, [-50]; color = crimson)
         # hlines!(ax, [-70]; color = crimson, linestyle = :dash)
@@ -833,23 +893,29 @@ begin # * Additional properties: image and distribution fit
         lines!(axvi1, ts, y, linewidth = 3)
     end
     begin # * Voltage distribution
-        axv2 = Axis(gg[1, 2]; title = "Density", xticks = WilkinsonTicks(3; k_max = 3),
-                    xlabel = "V (mV)")
+        axv2 = Axis(
+            gg[1, 2]; title = "Density", xticks = WilkinsonTicks(3; k_max = 3),
+            xlabel = "V (mV)"
+        )
         # hideydecorations!(axv2)
         # hidexdecorations!(axv2)
 
         v = V[1:10:end]
         bins = -70:0.1:-50
         bins = bins[2:end]
-        ziggurat!(axv2, v; bins, normalization = :pdf,
-                  color = cornflowerblue)
+        ziggurat!(
+            axv2, v; bins, normalization = :pdf,
+            color = cornflowerblue
+        )
         vlines!(axv2, [mean(V)]; color = :gray, linestyle = :dash)
     end
     begin # * step size distribution
-        axvi2 = Axis(gg[2, 2]; title = "Step sizes",
-                     xticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
-                     yticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
-                     yscale = log10, xscale = log10, xlabel = "|ΔI| (nA)")
+        axvi2 = Axis(
+            gg[2, 2]; title = "Step sizes",
+            xticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
+            yticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
+            yscale = log10, xscale = log10, xlabel = "|ΔI| (nA)"
+        )
         # hideydecorations!(axvi2)
         # hidexdecorations!(axvi2)
 
@@ -857,8 +923,10 @@ begin # * Additional properties: image and distribution fit
 
         bins = 0:0.1:4
         bins = bins[2:end]
-        ziggurat!(axvi2, vi[1:10:end]; bins, normalization = :pdf,
-                  color = cornflowerblue)
+        ziggurat!(
+            axvi2, vi[1:10:end]; bins, normalization = :pdf,
+            color = cornflowerblue
+        )
         # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
 
         # rowsize!(mf.layout, 0, Relative(0.2))
